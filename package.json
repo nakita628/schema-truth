@@ -1,0 +1,25 @@
+{
+  "name": "schema-truth-monorepo",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "check": "vp fmt --check && vp run -r check && vp run lint",
+    "deps": "mkdir -p /tmp/pnpm-store && pnpm config set store-dir /tmp/pnpm-store && rm -rf node_modules && rm -rf pnpm-lock.yaml && rm -rf ~/.pnpm-store && pnpm store prune && pnpm install --no-prefer-frozen-lockfile",
+    "fix": "vp fmt && vp run -r check --fix && markdownlint-cli2 --fix && textlint --fix \"**/*.md\" \"**/*.mdc\"",
+    "lint": "markdownlint-cli2 && textlint \"**/*.md\" \"**/*.mdc\" && cspell --no-progress --dot \"**/*.{md,mdc,ts,js,mjs,json,jsonc,yaml,yml}\" && secretlint --secretlintignore .secretlintignore --maskSecrets \"**/*\" && textlint --config .textlintrc.links.json \"**/*.md\" \"**/*.mdc\"",
+    "test": "vp test && vp run schema-truth#test"
+  },
+  "devDependencies": {
+    "@secretlint/secretlint-rule-preset-recommend": "13.0.7",
+    "cspell": "10.4.0",
+    "markdownlint-cli2": "0.24.0",
+    "secretlint": "13.0.7",
+    "textlint": "15.8.0",
+    "textlint-filter-rule-comments": "1.3.0",
+    "textlint-rule-no-dead-link": "6.2.3",
+    "textlint-rule-terminology": "5.2.16",
+    "vite-plus": "1.3.0"
+  },
+  "packageManager": "pnpm@12.15.0"
+}

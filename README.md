@@ -1,1 +1,1 @@
-# schema-truth
+packages/schema-truth/README.md
