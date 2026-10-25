@@ -13,9 +13,18 @@ export const Query = Schema.Unknown.pipe(
   ),
   Schema.decodeTo(
     Schema.Struct({
-      page: Schema.FiniteFromString.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(1)).pipe(
-        Schema.withDecodingDefaultType(Effect.succeed(1)),
-      ),
+      page: Schema.String.check(Schema.isPattern(/^-?(?:0|[1-9]\d*)$/))
+        .pipe(
+          Schema.decodeTo(
+            Schema.Finite,
+            SchemaTransformation.transform({
+              decode: (input) => Number(input),
+              encode: (output) => String(output),
+            }),
+          ),
+        )
+        .check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(1))
+        .pipe(Schema.withDecodingDefaultType(Effect.succeed(1))),
       ids: Schema.optional(
         Schema.Unknown.pipe(
           Schema.decodeTo(
@@ -25,11 +34,35 @@ export const Query = Schema.Unknown.pipe(
               encode: (output) => output,
             }),
           ),
-          Schema.decodeTo(Schema.Array(Schema.FiniteFromString.check(Schema.isInt()))),
+          Schema.decodeTo(
+            Schema.Array(
+              Schema.String.check(Schema.isPattern(/^-?(?:0|[1-9]\d*)$/))
+                .pipe(
+                  Schema.decodeTo(
+                    Schema.Finite,
+                    SchemaTransformation.transform({
+                      decode: (input) => Number(input),
+                      encode: (output) => String(output),
+                    }),
+                  ),
+                )
+                .check(Schema.isInt()),
+            ),
+          ),
         ),
       ),
       sort: Schema.optional(
-        Schema.FiniteFromString.pipe(Schema.decodeTo(Schema.Literals([1, -1]))),
+        Schema.String.check(Schema.isPattern(/^-?(?:0|[1-9]\d*)$/))
+          .pipe(
+            Schema.decodeTo(
+              Schema.Finite,
+              SchemaTransformation.transform({
+                decode: (input) => Number(input),
+                encode: (output) => String(output),
+              }),
+            ),
+          )
+          .pipe(Schema.decodeTo(Schema.Literals([1, -1]))),
       ),
       active: Schema.optional(
         Schema.String.check(
@@ -55,7 +88,21 @@ export const Query = Schema.Unknown.pipe(
               encode: (output) => output,
             }),
           ),
-          Schema.decodeTo(Schema.NullOr(Schema.FiniteFromString.check(Schema.isInt()))),
+          Schema.decodeTo(
+            Schema.NullOr(
+              Schema.String.check(Schema.isPattern(/^-?(?:0|[1-9]\d*)$/))
+                .pipe(
+                  Schema.decodeTo(
+                    Schema.Finite,
+                    SchemaTransformation.transform({
+                      decode: (input) => Number(input),
+                      encode: (output) => String(output),
+                    }),
+                  ),
+                )
+                .check(Schema.isInt()),
+            ),
+          ),
         ),
       ),
       cursor: Schema.optional(
@@ -63,15 +110,46 @@ export const Query = Schema.Unknown.pipe(
           Schema.isBetweenBigInt({ minimum: 0n, maximum: 18446744073709551615n }),
         ),
       ),
-      offset: Schema.optional(Schema.FiniteFromString.check(Schema.isGreaterThanOrEqualTo(0))),
+      offset: Schema.optional(
+        Schema.String.check(Schema.isPattern(/^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/))
+          .pipe(
+            Schema.decodeTo(
+              Schema.Finite,
+              SchemaTransformation.transform({
+                decode: (input) => Number(input),
+                encode: (output) => String(output),
+              }),
+            ),
+          )
+          .check(Schema.isGreaterThanOrEqualTo(0)),
+      ),
       skip: Schema.optional(
-        Schema.FiniteFromString.check(Schema.isInt()).check(
-          Schema.makeFilter((input) => input !== 0),
-        ),
+        Schema.String.check(Schema.isPattern(/^-?(?:0|[1-9]\d*)$/))
+          .pipe(
+            Schema.decodeTo(
+              Schema.Finite,
+              SchemaTransformation.transform({
+                decode: (input) => Number(input),
+                encode: (output) => String(output),
+              }),
+            ),
+          )
+          .check(Schema.isInt())
+          .check(Schema.makeFilter((input) => input !== 0)),
       ),
       flag: Schema.optional(
         Schema.Union([
-          Schema.FiniteFromString.check(Schema.isInt()),
+          Schema.String.check(Schema.isPattern(/^-?(?:0|[1-9]\d*)$/))
+            .pipe(
+              Schema.decodeTo(
+                Schema.Finite,
+                SchemaTransformation.transform({
+                  decode: (input) => Number(input),
+                  encode: (output) => String(output),
+                }),
+              ),
+            )
+            .check(Schema.isInt()),
           Schema.String.check(
             Schema.isPattern(/^(?:true|1|yes|on|y|enabled|false|0|no|off|n|disabled)$/i),
           ).pipe(
@@ -85,7 +163,19 @@ export const Query = Schema.Unknown.pipe(
           ),
         ]),
       ),
-      constructor: Schema.optional(Schema.FiniteFromString.check(Schema.isInt())),
+      constructor: Schema.optional(
+        Schema.String.check(Schema.isPattern(/^-?(?:0|[1-9]\d*)$/))
+          .pipe(
+            Schema.decodeTo(
+              Schema.Finite,
+              SchemaTransformation.transform({
+                decode: (input) => Number(input),
+                encode: (output) => String(output),
+              }),
+            ),
+          )
+          .check(Schema.isInt()),
+      ),
       email: Schema.optional(
         Schema.Trim.check(Schema.isPattern(/^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/)),
       ),

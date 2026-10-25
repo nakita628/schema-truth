@@ -684,13 +684,13 @@ describe('typebox', () => {
   describe('paramIn coercion', () => {
     it('query: number → Type.Transform decode Number', () => {
       expect(typebox({ type: 'number' }, 'Schema', false, { paramIn: 'query' })).toBe(
-        'Codec(Type.String()).Decode((value)=>Number(value)).Encode((value)=>String(value))',
+        'Codec(Type.String({pattern:/^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$/})).Decode((value)=>Number(value)).Encode((value)=>String(value))',
       )
     })
 
     it("path: boolean → Type.Transform decode 'true'|'false'", () => {
       expect(typebox({ type: 'boolean' }, 'Schema', false, { paramIn: 'path' })).toBe(
-        "Codec(Type.Union([Type.Literal('true'),Type.Literal('false')])).Decode((value)=>value==='true').Encode((value)=>value?'true':'false')",
+        "Codec(Type.String({pattern:/^(?:true|1|yes|on|y|enabled|false|0|no|off|n|disabled)$/i})).Decode((value)=>/^(?:true|1|yes|on|y|enabled)$/i.test(value)).Encode((value)=>value?'true':'false')",
       )
     })
 
@@ -760,5 +760,24 @@ describe('typebox', () => {
     ])('typebox(%o, %o) → %s', (schema, options, expected) => {
       expect(typebox(schema, 'Schema', false, options)).toBe(expected)
     })
+  })
+})
+
+describe('allOf keyword members', () => {
+  it.concurrent.each<[JSONSchema, EmitOptions | undefined, string]>([
+    [{ allOf: [{ type: 'integer' }, { minimum: 5 }] }, undefined, 'Type.Integer({minimum:5})'],
+    [{ allOf: [{ minimum: 5 }] }, undefined, 'Type.Number({minimum:5})'],
+    [
+      { type: 'integer' },
+      { paramIn: 'query' },
+      'Codec(Type.String({pattern:/^-?(?:0|[1-9]\\d*)$/})).Decode((value)=>Number(value)).Encode((value)=>String(value))',
+    ],
+    [
+      { type: 'boolean' },
+      { paramIn: 'path' },
+      "Codec(Type.String({pattern:/^(?:true|1|yes|on|y|enabled|false|0|no|off|n|disabled)$/i})).Decode((value)=>/^(?:true|1|yes|on|y|enabled)$/i.test(value)).Encode((value)=>value?'true':'false')",
+    ],
+  ])('typebox(%o, %o) → %s', (schema, options, expected) => {
+    expect(typebox(schema, 'Schema', false, options)).toBe(expected)
   })
 })

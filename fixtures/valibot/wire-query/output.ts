@@ -9,18 +9,38 @@ export const Query = v.pipe(
   ),
   v.object({
     page: v.optional(
-      v.pipe(v.string(), v.transform(Number), v.number(), v.safeInteger(), v.minValue(1)),
+      v.pipe(
+        v.string(),
+        v.regex(/^-?(?:0|[1-9]\d*)$/),
+        v.transform((input) => Number(input)),
+        v.number(),
+        v.safeInteger(),
+        v.minValue(1),
+      ),
       '1',
     ),
     ids: v.optional(
       v.pipe(
         v.unknown(),
         v.transform((input) => (input === undefined || Array.isArray(input) ? input : [input])),
-        v.array(v.pipe(v.string(), v.transform(Number), v.number(), v.safeInteger())),
+        v.array(
+          v.pipe(
+            v.string(),
+            v.regex(/^-?(?:0|[1-9]\d*)$/),
+            v.transform((input) => Number(input)),
+            v.number(),
+            v.safeInteger(),
+          ),
+        ),
       ),
     ),
     sort: v.optional(
-      v.pipe(v.string(), v.transform(Number), v.union([v.literal(1), v.literal(-1)])),
+      v.pipe(
+        v.string(),
+        v.regex(/^-?(?:0|[1-9]\d*)$/),
+        v.transform((input) => Number(input)),
+        v.union([v.literal(1), v.literal(-1)]),
+      ),
     ),
     active: v.optional(
       v.pipe(
@@ -34,7 +54,15 @@ export const Query = v.pipe(
       v.pipe(
         v.unknown(),
         v.transform((input) => (input === 'null' ? null : input)),
-        v.nullable(v.pipe(v.string(), v.transform(Number), v.number(), v.safeInteger())),
+        v.nullable(
+          v.pipe(
+            v.string(),
+            v.regex(/^-?(?:0|[1-9]\d*)$/),
+            v.transform((input) => Number(input)),
+            v.number(),
+            v.safeInteger(),
+          ),
+        ),
       ),
     ),
     cursor: v.optional(
@@ -47,12 +75,20 @@ export const Query = v.pipe(
       ),
     ),
     offset: v.optional(
-      v.pipe(v.string(), v.transform(Number), v.number(), v.finite(), v.minValue(0)),
+      v.pipe(
+        v.string(),
+        v.regex(/^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/),
+        v.transform((input) => Number(input)),
+        v.number(),
+        v.finite(),
+        v.minValue(0),
+      ),
     ),
     skip: v.optional(
       v.pipe(
         v.string(),
-        v.transform(Number),
+        v.regex(/^-?(?:0|[1-9]\d*)$/),
+        v.transform((input) => Number(input)),
         v.number(),
         v.safeInteger(),
         v.check((input) => input !== 0),
@@ -60,7 +96,13 @@ export const Query = v.pipe(
     ),
     flag: v.optional(
       v.union([
-        v.pipe(v.string(), v.transform(Number), v.number(), v.safeInteger()),
+        v.pipe(
+          v.string(),
+          v.regex(/^-?(?:0|[1-9]\d*)$/),
+          v.transform((input) => Number(input)),
+          v.number(),
+          v.safeInteger(),
+        ),
         v.pipe(
           v.string(),
           v.regex(/^(?:true|1|yes|on|y|enabled|false|0|no|off|n|disabled)$/i),
@@ -68,7 +110,15 @@ export const Query = v.pipe(
         ),
       ]),
     ),
-    constructor: v.optional(v.pipe(v.string(), v.transform(Number), v.number(), v.safeInteger())),
+    constructor: v.optional(
+      v.pipe(
+        v.string(),
+        v.regex(/^-?(?:0|[1-9]\d*)$/),
+        v.transform((input) => Number(input)),
+        v.number(),
+        v.safeInteger(),
+      ),
+    ),
     email: v.optional(v.pipe(v.string(), v.trim(), v.email())),
   }),
 )

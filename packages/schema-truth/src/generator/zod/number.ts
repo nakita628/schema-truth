@@ -1,28 +1,38 @@
+import { integerWirePattern, numberWirePattern } from '../../helper/index.js'
 import type { JSONSchema } from '../../parser/index.js'
 import { zodBaseError, zodError } from '../../utils/index.js'
+
+/**
+ * Wire text checked against the integer or JSON number grammar, then read with `Number`.
+ * `z.coerce.number()` uses `Number` on its own, which accepts `""`, `" "` and `"0x10"`.
+ */
+export function zodWireNumber(kind: 'integer' | 'number', errorArg = ''): string {
+  const pattern = kind === 'integer' ? integerWirePattern() : numberWirePattern()
+  const errorPart = errorArg === '' ? '' : `,${errorArg}`
+  return `z.string().regex(${pattern}${errorPart}).transform((val)=>Number(val))`
+}
 
 /**
  * Generates a Zod schema for number types (number / float32 / float64), with
  * min/max/multipleOf constraints and `x-*-message` vendor extensions translated
  * to Zod v4 `{error: "msg"}` parameters.
  */
-export function number(schema: JSONSchema) {
+export function number(schema: JSONSchema, options?: { readonly wire?: boolean }) {
+  const isWire = options?.wire === true
   const errorMessage = schema['x-error-message']
   const requiredMessage = schema['x-required-message']
-  const isCoerce = schema['x-coerce'] === true
-  // coerce converts undefined → NaN before the error handler runs,
-  // so issue.input === undefined is unreachable — drop x-required-message.
-  const baseErrorArg = zodBaseError(errorMessage, isCoerce ? undefined : requiredMessage)
+  const isCoerce = schema['x-coerce'] === true && !isWire
+  // Coercion converts undefined → NaN before the error handler runs, and wire text is
+  // never undefined once it reaches the grammar, so drop x-required-message.
+  const baseErrorArg = zodBaseError(errorMessage, isCoerce || isWire ? undefined : requiredMessage)
   const isFloat32 = schema.format === 'float' || schema.format === 'float32'
   const isFloat64 = schema.format === 'float64'
-  const wirePipe = isCoerce && (isFloat32 || isFloat64)
-  const wirePlain = isCoerce && !isFloat32 && !isFloat64
-  const base = wirePlain
-    ? `z.coerce.number(${baseErrorArg})`
-    : isFloat32
-      ? `z.float32(${baseErrorArg})`
-      : isFloat64
-        ? `z.float64(${baseErrorArg})`
+  const base = isFloat32
+    ? `z.float32(${baseErrorArg})`
+    : isFloat64
+      ? `z.float64(${baseErrorArg})`
+      : isCoerce
+        ? `z.coerce.number(${baseErrorArg})`
         : `z.number(${baseErrorArg})`
   // v3.0: separate inclusive (.min()) / exclusive (.gt() / .positive()) slots
   const minimumMessage = schema['x-minimum-message']
@@ -84,5 +94,9 @@ export function number(schema: JSONSchema) {
       ? `.multipleOf(${schema.multipleOf}${multipleOfErrorArg})`
       : undefined
   const innerChain = [base, minimum, maximum, multipleOf].filter((v) => v !== undefined).join('')
-  return wirePipe ? `z.coerce.number(${baseErrorArg}).pipe(${innerChain})` : innerChain
+  if (isWire) return `${zodWireNumber('number', baseErrorArg)}.pipe(${innerChain})`
+  if (isCoerce && (isFloat32 || isFloat64)) {
+    return `z.coerce.number(${baseErrorArg}).pipe(${innerChain})`
+  }
+  return innerChain
 }

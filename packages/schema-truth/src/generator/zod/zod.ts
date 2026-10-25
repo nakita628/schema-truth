@@ -9,7 +9,11 @@ import {
   isStringWireLocation,
 } from '../../guard/index.js'
 import {
+  constraintMessage,
+  constraintPredicate,
+  foldAllOfMembers,
   impliedWireType,
+  isKeywordOnlyMember,
   isNullMatchedFirst,
   isNullTextRead,
   isPrimitiveUnion,
@@ -19,6 +23,7 @@ import {
   unionPrimitiveTypes,
   wireArrayOnce,
   wireNullText,
+  wireNumericKind,
   zodWrap as _zodWrap,
 } from '../../helper/index.js'
 import type { CodeExtensionOptions } from '../../helper/index.js'
@@ -32,7 +37,7 @@ import {
 } from '../../utils/index.js'
 import { _enum } from './enum.js'
 import { int64Input, integer, isInt64 } from './integer.js'
-import { number } from './number.js'
+import { number, zodWireNumber } from './number.js'
 import { object } from './object.js'
 import { parameter, hasParameterSerialization, withoutParameterSerialization } from './parameter.js'
 import { string } from './string.js'
@@ -101,6 +106,12 @@ export function zod(
   return `z.preprocess(${wireNullText('val')},${nullFirst})`
 }
 
+/** A keyword-only `allOf` member: the keywords apply when the value has their type. */
+function keywordConstraint(schema: JSONSchema): string {
+  const body = constraintPredicate(schema, 'val')
+  return `z.any().refine((val) => ${body}${zodErrorPart(constraintMessage(schema))})`
+}
+
 function node(
   schema: JSONSchema,
   rootName: string,
@@ -109,8 +120,6 @@ function node(
 ): string {
   const isStringWireParam = isStringWireLocation(options?.paramIn)
   const isWireCoerced = isStringWireParam && schema['x-coerce'] !== false
-  const withForcedCoerce = (s: JSONSchema): JSONSchema =>
-    isStringWireParam && s['x-coerce'] !== false ? { ...s, 'x-coerce': true } : s
   const codeExtOpts: CodeExtensionOptions =
     options?.unsafeCodeExtensions === true ? { unsafeCodeExtensions: true } : {}
   const zodWrap = (zodStr: string, s: JSONSchema): string => _zodWrap(zodStr, s, codeExtOpts)
@@ -122,7 +131,7 @@ function node(
   const literalInput = (values: readonly unknown[]): string | undefined => {
     if (values.every((v) => typeof v === 'number')) {
       if (isInt64(schema)) return int64Input(isWireCoerced)
-      if (isWireCoerced) return 'z.coerce.number()'
+      if (isWireCoerced) return zodWireNumber(wireNumericKind(schema, values))
     }
     if (isWireCoerced && values.every((v) => typeof v === 'boolean')) return 'z.stringbool()'
     return undefined
@@ -184,9 +193,10 @@ function node(
     if (schema.allOf.length === 0) return zodWrap('z.any()', schema)
     const nullable = isNullable(schema) || schema.allOf.some(isNullTypeMember)
     const defaultValue = schema.allOf.find(isDefaultOnlyMember)?.default
-    const schemas = schema.allOf
-      .filter((s) => !isShapelessMember(s))
-      .map((s) => zod(s, rootName, isZod, options))
+    const schemas = foldAllOfMembers(
+      schema.allOf.filter((s) => !isShapelessMember(s)),
+      isWireCoerced,
+    ).map((s) => (isKeywordOnlyMember(s) ? keywordConstraint(s) : zod(s, rootName, isZod, options)))
     if (schemas.length === 0) return zodWrap('z.any()', { ...schema, nullable })
     const intersected =
       schemas.length === 1 ? schemas[0] : schemas.reduce((acc, s) => `z.intersection(${acc},${s})`)
@@ -257,8 +267,8 @@ function node(
   const types = normalizeTypes(schema.type)
   const primitive = (t: string): string | undefined => {
     if (t === 'string') return string(schema)
-    if (t === 'number') return number(withForcedCoerce(schema))
-    if (t === 'integer') return integer(withForcedCoerce(schema))
+    if (t === 'number') return number(schema, { wire: isWireCoerced })
+    if (t === 'integer') return integer(schema, { wire: isWireCoerced })
     if (t !== 'boolean') return undefined
     const errorMessage = schema['x-error-message']
     const errorArg = errorMessage ? zodError(errorMessage) : ''

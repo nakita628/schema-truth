@@ -1,5 +1,6 @@
 import { INTEGER_TEXT_PATTERN } from '../../constants/index.js'
 import { regexSource } from '../../helper/format.js'
+import { integerWirePattern } from '../../helper/wire.js'
 import type { JSONSchema } from '../../parser/index.js'
 import { valibotError } from '../../utils/index.js'
 import { numberActions, rangeActions } from './number.js'
@@ -32,7 +33,8 @@ export function int64Input(isWire: boolean, baseErrorArg = ''): readonly string[
 /**
  * The Valibot schema of an integer node. `int64` / `uint64` are bigints wherever they
  * come from, `bigint` is one too, `int32` / `uint32` carry their range, and on the
- * string wire the text is read with `Number` and checked a safe integer.
+ * string wire the text has to match the integer grammar before `Number` reads it, and is
+ * then checked a safe integer.
  */
 export function integer(schema: JSONSchema, options?: { readonly wire?: boolean }) {
   const isWire = options?.wire === true
@@ -65,6 +67,13 @@ export function integer(schema: JSONSchema, options?: { readonly wire?: boolean 
     ? `v.safeInteger(${errorMessage ? baseErrorArg : ''})`
     : `v.integer(${errorMessage ? baseErrorArg : ''})`
   const actions = [integerAction, ...rangeActions(schema.format), ...numberActions(schema)]
-  const input = isWire ? ['v.string()', 'v.transform(Number)'] : []
+  const regexError = baseErrorArg === '' ? '' : `,${baseErrorArg}`
+  const input = isWire
+    ? [
+        'v.string()',
+        `v.regex(${integerWirePattern()}${regexError})`,
+        'v.transform((input)=>Number(input))',
+      ]
+    : []
   return `v.pipe(${[...input, `v.number(${baseErrorArg})`, ...actions].join(',')})`
 }

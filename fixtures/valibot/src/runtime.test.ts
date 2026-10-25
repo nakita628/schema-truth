@@ -1,6 +1,7 @@
 import * as v from 'valibot'
 import { describe, expect, it } from 'vite-plus/test'
 import { Config as AdditionalConfig } from '../additional-properties/output.ts'
+import { Bounded } from '../allof-keyword/output.ts'
 import { Combined } from '../allof/output.ts'
 import { Merged } from '../allof-message/output.ts'
 import { Pet as DiscriminatedPet } from '../discriminated-union/output.ts'
@@ -190,6 +191,14 @@ describe('allof: Combined', () => {
         },
       ])
     }
+  })
+})
+
+describe('allof-keyword: Bounded', () => {
+  it('keeps a minimum folded onto the integer', () => {
+    expect(v.safeParse(Bounded, 5).success).toBe(true)
+    expect(v.safeParse(Bounded, 3).success).toBe(false)
+    expect(v.safeParse(Bounded, 5.5).success).toBe(false)
   })
 })
 
@@ -1297,6 +1306,11 @@ describe('valibot fixtures: wire-query runtime', () => {
     expect(v.parse(WireQuery, { page: '1', offset: '1e3' })).toStrictEqual({ page: 1, offset: 1000 })
     expect(v.safeParse(WireQuery, { page: '1', offset: '1e309' }).success).toBe(false)
     expect(v.safeParse(WireQuery, { page: '1', skip: '1.5' }).success).toBe(false)
+    expect(v.safeParse(WireQuery, { page: '007' }).success).toBe(false)
+    expect(v.safeParse(WireQuery, { page: '1', skip: '1.0' }).success).toBe(false)
+    expect(v.safeParse(WireQuery, { page: '1', skip: '1e3' }).success).toBe(false)
+    expect(v.safeParse(WireQuery, { page: '1', offset: '0x10' }).success).toBe(false)
+    expect(v.safeParse(WireQuery, { page: '1', offset: '' }).success).toBe(false)
   })
 
   it('reports a bad array element at its index', () => {

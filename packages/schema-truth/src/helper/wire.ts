@@ -1,4 +1,6 @@
 import {
+  INTEGER_WIRE_PATTERN,
+  NUMBER_WIRE_PATTERN,
   STRINGBOOL_PATTERN,
   STRINGBOOL_TRUTHY_PATTERN,
   WIRE_PRIMITIVE_ORDER,
@@ -93,6 +95,35 @@ export function wireNullText(param: string): string {
  */
 export function ownProperties(param: string): string {
   return `(${param})=>(typeof ${param}==="object"&&${param}!==null&&!Array.isArray(${param})?Object.assign(Object.create(null),${param}):${param})`
+}
+
+/** The regex literal of integer text on the wire. */
+export function integerWirePattern(): string {
+  return regexSource(INTEGER_WIRE_PATTERN)
+}
+
+/** The regex literal of JSON number text on the wire. */
+export function numberWirePattern(): string {
+  return regexSource(NUMBER_WIRE_PATTERN)
+}
+
+/**
+ * Whether wire text for these literals is an integer or a number. An integer rejects
+ * exponents and fractions; a number follows the JSON number grammar.
+ */
+export function wireNumericKind(
+  schema: JSONSchema,
+  values: readonly unknown[],
+): 'integer' | 'number' {
+  const types = schema.type
+  if (types === 'number') return 'number'
+  if (types === 'integer') return 'integer'
+  if (Array.isArray(types) && types.includes('number')) return 'number'
+  if (Array.isArray(types) && types.includes('integer')) return 'integer'
+  if (values.every((value) => typeof value === 'number' && Number.isInteger(value))) {
+    return 'integer'
+  }
+  return 'number'
 }
 
 /** The regex literal of every spelling of a boolean on the wire. */

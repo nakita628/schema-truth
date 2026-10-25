@@ -10,13 +10,19 @@ import {
   isStringWireLocation,
 } from '../../guard/index.js'
 import {
+  constraintMessage,
+  constraintPredicate,
+  foldAllOfMembers,
   hasParameterSerialization,
   impliedWireType,
+  integerWirePattern,
+  isKeywordOnlyMember,
   isNullTextRead,
   isPrimitiveUnion,
   itemsSchemaOf,
   jsLiteral,
   notPredicate,
+  numberWirePattern,
   parameterReaders,
   refTarget,
   stringboolPattern,
@@ -24,6 +30,7 @@ import {
   unionPrimitiveTypes,
   valibotWrap as _valibotWrap,
   wireArrayOnce,
+  wireNumericKind,
   withoutParameterSerialization,
 } from '../../helper/index.js'
 import type { ValibotWrapOptions } from '../../helper/index.js'
@@ -109,6 +116,12 @@ export function valibot(
   return node(schema, rootName, isValibot, options)
 }
 
+/** A keyword-only `allOf` member: the keywords apply when the value has their type. */
+function keywordConstraint(schema: JSONSchema): string {
+  const body = constraintPredicate(schema, 'input')
+  return `v.pipe(v.any(),v.check((input) => ${body}${valibotErrorPart(constraintMessage(schema))}))`
+}
+
 function node(
   schema: JSONSchema,
   rootName: string,
@@ -134,7 +147,11 @@ function node(
   const literalInput = (values: readonly unknown[]): readonly string[] | undefined => {
     if (values.every((v) => typeof v === 'number')) {
       if (isInt64(schema)) return int64Input(isWireCoerced)
-      if (isWireCoerced) return ['v.string()', 'v.transform(Number)']
+      if (isWireCoerced) {
+        const pattern =
+          wireNumericKind(schema, values) === 'integer' ? integerWirePattern() : numberWirePattern()
+        return ['v.string()', `v.regex(${pattern})`, 'v.transform((input)=>Number(input))']
+      }
     }
     if (isWireCoerced && values.every((v) => typeof v === 'boolean')) return stringboolItems('')
     return undefined
@@ -190,9 +207,12 @@ function node(
     if (schema.allOf.length === 0) return valibotWrap('v.any()', schema)
     const nullable = isNullable(schema) || schema.allOf.some(isNullTypeMember)
     const defaultValue = schema.allOf.find(isDefaultOnlyMember)?.default
-    const schemas = schema.allOf
-      .filter((s) => !isShapelessMember(s))
-      .map((s) => valibot(s, rootName, isValibot, options))
+    const schemas = foldAllOfMembers(
+      schema.allOf.filter((s) => !isShapelessMember(s)),
+      isWireCoerced,
+    ).map((s) =>
+      isKeywordOnlyMember(s) ? keywordConstraint(s) : valibot(s, rootName, isValibot, options),
+    )
     if (schemas.length === 0) return valibotWrap('v.any()', { ...schema, nullable })
     const intersected = schemas.length === 1 ? schemas[0] : `v.intersect([${schemas.join(',')}])`
     const allOfMessage = schema['x-allOf-message']

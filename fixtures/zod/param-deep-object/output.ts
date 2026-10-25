@@ -9,7 +9,14 @@ export const Filter = z.preprocess(
     }, {})
     return Object.keys(out).length > 0 ? out : val
   },
-  z.object({ age: z.coerce.number().int(), name: z.string().exactOptional() }),
+  z.object({
+    age: z
+      .string()
+      .regex(/^-?(?:0|[1-9]\d*)$/)
+      .transform((val) => Number(val))
+      .pipe(z.number().int()),
+    name: z.string().exactOptional(),
+  }),
 )
 
 export type Filter = z.infer<typeof Filter>

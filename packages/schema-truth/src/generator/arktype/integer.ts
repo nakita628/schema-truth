@@ -4,9 +4,11 @@ import type { JSONSchema } from '../../parser/index.js'
 import {
   constraintDefinition,
   hasPerKeywordMessage,
+  methodChain,
   numericConstraints,
   numericNarrows,
   rangeConstraints,
+  usesExponent,
 } from './number.js'
 
 /** Whether a node is a 64-bit integer: a value beyond 2^53 that is read as a bigint. */
@@ -84,14 +86,15 @@ export function integer(schema: JSONSchema, options?: { readonly wire?: boolean 
   }
 
   const range = rangeConstraints(schema.format)
+  const constraints = [...range, ...numericConstraints(schema)]
   if (hasPerKeywordMessage(schema)) {
-    const base = constraintDefinition('number.integer', range)
-    return `type(${base})${numericNarrows(schema, errorMessage)}${describe}`
+    const base = usesExponent(range)
+      ? methodChain('number.integer', range)
+      : `type(${constraintDefinition('number.integer', range)})`
+    return `${base}${numericNarrows(schema, errorMessage)}${describe}`
   }
-  const definition = constraintDefinition('number.integer', [
-    ...range,
-    ...numericConstraints(schema),
-  ])
+  if (usesExponent(constraints)) return `${methodChain('number.integer', constraints)}${describe}`
+  const definition = constraintDefinition('number.integer', constraints)
   if (errorMessage) return `type(${definition})${describe}`
   return definition
 }

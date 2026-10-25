@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vite-plus/test'
 import { User as DefsUser } from '../$defs/output.ts'
 import { Config as AdditionalPropertiesConfig } from '../additional-properties/output.ts'
+import { Bounded } from '../allof-keyword/output.ts'
 import { Combined } from '../allof/output.ts'
 import { Filter as ParamDeepObjectFilter } from '../param-deep-object/output.ts'
 import { Ids as ParamFormNoExplodeIds } from '../param-form-no-explode/output.ts'
@@ -141,6 +142,14 @@ describe('zod fixtures: allof runtime', () => {
         },
       ])
     }
+  })
+})
+
+describe('zod fixtures: allof-keyword runtime', () => {
+  it('keeps a minimum folded onto the integer', () => {
+    expect(Bounded.safeParse(5).success).toBe(true)
+    expect(Bounded.safeParse(3).success).toBe(false)
+    expect(Bounded.safeParse(5.5).success).toBe(false)
   })
 })
 
@@ -723,6 +732,10 @@ describe('zod fixtures: wire-query runtime', () => {
     expect(WireQuery.parse({})).toStrictEqual({ page: 1 })
   })
 
+  it('reads a JSON number and refuses integer text that is not a decimal integer', () => {
+    expect(WireQuery.parse({ page: '1', offset: '1e3' })).toStrictEqual({ page: 1, offset: 1000 })
+  })
+
   it('reports a bad array element at its index', () => {
     const result = WireQuery.safeParse({ ids: ['1', 'x'] })
     expect(result.error?.issues.map((issue) => issue.path)).toStrictEqual([['ids', 1]])
@@ -732,7 +745,12 @@ describe('zod fixtures: wire-query runtime', () => {
     [{ sort: '2' }, 'sort'],
     [{ active: 'false' }, 'active'],
     [{ offset: '-1' }, 'offset'],
+    [{ offset: '0x10' }, 'offset'],
+    [{ offset: '' }, 'offset'],
+    [{ page: '007' }, 'page'],
     [{ skip: '0' }, 'skip'],
+    [{ skip: '1.0' }, 'skip'],
+    [{ skip: '1e3' }, 'skip'],
     [{ skip: 'abc' }, 'skip'],
     [{ cursor: '-1' }, 'cursor'],
   ])('rejects %o at %s', (input, key) => {

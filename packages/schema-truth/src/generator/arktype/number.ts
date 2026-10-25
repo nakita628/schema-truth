@@ -1,31 +1,56 @@
 import { NUMBER_RANGES } from '../../constants/index.js'
+import { integerWirePattern, numberWirePattern } from '../../helper/index.js'
 import type { JSONSchema } from '../../parser/index.js'
 
-/** The DSL comparators of a numeric node: `>= 1`, `< 5`, `% 2`. */
-export function numericConstraints(schema: JSONSchema): readonly string[] {
-  const minimum = (() => {
+/** One numeric comparator. `value` is the source literal, which may be exponent notation. */
+export type NumericBound = {
+  readonly op: '>=' | '>' | '<=' | '<' | '%'
+  readonly value: string
+}
+
+/** The comparators of a numeric node: `>= 1`, `< 5`, `% 2`. */
+export function numericConstraints(schema: JSONSchema): readonly NumericBound[] {
+  const minimum = ((): NumericBound | undefined => {
     if (schema.minimum !== undefined) {
-      return schema.exclusiveMinimum === true ? `> ${schema.minimum}` : `>= ${schema.minimum}`
+      return schema.exclusiveMinimum === true
+        ? { op: '>', value: String(schema.minimum) }
+        : { op: '>=', value: String(schema.minimum) }
     }
-    if (typeof schema.exclusiveMinimum === 'number') return `> ${schema.exclusiveMinimum}`
+    if (typeof schema.exclusiveMinimum === 'number') {
+      return { op: '>', value: String(schema.exclusiveMinimum) }
+    }
     return undefined
   })()
-  const maximum = (() => {
+  const maximum = ((): NumericBound | undefined => {
     if (schema.maximum !== undefined) {
-      return schema.exclusiveMaximum === true ? `< ${schema.maximum}` : `<= ${schema.maximum}`
+      return schema.exclusiveMaximum === true
+        ? { op: '<', value: String(schema.maximum) }
+        : { op: '<=', value: String(schema.maximum) }
     }
-    if (typeof schema.exclusiveMaximum === 'number') return `< ${schema.exclusiveMaximum}`
+    if (typeof schema.exclusiveMaximum === 'number') {
+      return { op: '<', value: String(schema.exclusiveMaximum) }
+    }
     return undefined
   })()
-  const multipleOf = schema.multipleOf !== undefined ? `% ${schema.multipleOf}` : undefined
-  return [minimum, maximum, multipleOf].filter((v) => v !== undefined)
+  const multipleOf =
+    schema.multipleOf !== undefined
+      ? { op: '%' as const, value: String(schema.multipleOf) }
+      : undefined
+  return [minimum, maximum, multipleOf].filter(isNumericBound)
+}
+
+function isNumericBound(bound: NumericBound | undefined): bound is NumericBound {
+  return bound !== undefined
 }
 
 /** The range comparators of a fixed-width numeric `format`, if it has one. */
-export function rangeConstraints(format: string | undefined): readonly string[] {
+export function rangeConstraints(format: string | undefined): readonly NumericBound[] {
   const range = format === undefined ? undefined : NUMBER_RANGES[format]
   if (range === undefined) return []
-  return [`>= ${range.minimum}`, `<= ${range.maximum}`]
+  return [
+    { op: '>=', value: range.minimum },
+    { op: '<=', value: range.maximum },
+  ]
 }
 
 /**
@@ -33,9 +58,22 @@ export function rangeConstraints(format: string | undefined): readonly string[] 
  * `"number.integer >= 1 & number.integer <= 5"`. One definition, not an `.and()` chain
  * of them, so a morph can validate its output against it with `.to()`.
  */
-export function constraintDefinition(base: string, constraints: readonly string[]): string {
-  if (constraints.length === 0) return `"${base}"`
-  return `"${constraints.map((c) => `${base} ${c}`).join(' & ')}"`
+export function constraintDefinition(base: string, bounds: readonly NumericBound[]): string {
+  if (bounds.length === 0) return `"${base}"`
+  return `"${bounds.map((bound) => `${base} ${bound.op} ${bound.value}`).join(' & ')}"`
+}
+
+/** Whether a bound's literal is exponent notation, which the ArkType string parser rejects. */
+export function usesExponent(bounds: readonly NumericBound[]): boolean {
+  return bounds.some((bound) => /[eE]/.test(bound.value))
+}
+
+/**
+ * Bounds as methods on `type("number")`: a JavaScript number literal, so `1e+21` and the
+ * float32 limits never enter the string parser.
+ */
+export function methodChain(base: string, bounds: readonly NumericBound[]): string {
+  return `type("${base}")${bounds.map(boundMethod).join('')}`
 }
 
 /**
@@ -108,12 +146,13 @@ export function hasPerKeywordMessage(schema: JSONSchema): boolean {
 }
 
 /**
- * A morph reading the text of a wire parameter with `Number`, guarded by `guard`: what
- * every other generator reads, where ArkType's own `string.numeric.parse` refuses `1e3`,
- * `1.0`, `007` and `-0`.
+ * A morph reading wire text into a number. The text has to match the integer or JSON
+ * number grammar before `Number` sees it: `Number` accepts `""`, `" "`, `"0x10"` and,
+ * for an integer, `"1e3"`.
  */
 export function numberMorph(guard: 'isFinite' | 'isSafeInteger', expected: string): string {
-  return `type("string").pipe((data, ctx) => { const value = Number(data); return Number.${guard}(value) ? value : ctx.error(${JSON.stringify(expected)}) })`
+  const pattern = guard === 'isSafeInteger' ? integerWirePattern() : numberWirePattern()
+  return `type("string").pipe((data, ctx) => { const value = ${pattern}.test(data) ? Number(data) : Number.NaN; return Number.${guard}(value) ? value : ctx.error(${JSON.stringify(expected)}) })`
 }
 
 /**
@@ -125,15 +164,30 @@ export function number(schema: JSONSchema) {
   const errorMessage = schema['x-error-message'] ?? schema['x-required-message']
   const describe = errorMessage ? `.describe(${JSON.stringify(errorMessage)})` : ''
   const isFloat32 = schema.format === 'float' || schema.format === 'float32'
-  const constraints = [
-    ...rangeConstraints(isFloat32 ? 'float32' : undefined),
-    ...numericConstraints(schema),
-  ]
+  const range = rangeConstraints(isFloat32 ? 'float32' : undefined)
+  const constraints = [...range, ...numericConstraints(schema)]
   if (hasPerKeywordMessage(schema)) {
-    const base = constraintDefinition('number', rangeConstraints(isFloat32 ? 'float32' : undefined))
-    return `type(${base})${numericNarrows(schema, errorMessage)}${describe}`
+    const base = usesExponent(range)
+      ? methodChain('number', range)
+      : `type(${constraintDefinition('number', range)})`
+    return `${base}${numericNarrows(schema, errorMessage)}${describe}`
   }
+  if (usesExponent(constraints)) return `${methodChain('number', constraints)}${describe}`
   const definition = constraintDefinition('number', constraints)
   if (errorMessage) return `type(${definition})${describe}`
   return definition
+}
+
+function boundMethod(bound: NumericBound): string {
+  const name =
+    bound.op === '>='
+      ? 'atLeast'
+      : bound.op === '>'
+        ? 'moreThan'
+        : bound.op === '<='
+          ? 'atMost'
+          : bound.op === '<'
+            ? 'lessThan'
+            : 'divisibleBy'
+  return `.${name}(${bound.value})`
 }

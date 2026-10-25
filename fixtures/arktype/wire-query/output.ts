@@ -9,7 +9,7 @@ export const Query = type('object')
     type({
       page: type('string')
         .pipe((data, ctx) => {
-          const value = Number(data)
+          const value = /^-?(?:0|[1-9]\d*)$/.test(data) ? Number(data) : Number.NaN
           return Number.isSafeInteger(value) ? value : ctx.error('an integer')
         })
         .to('number.integer >= 1'),
@@ -17,15 +17,15 @@ export const Query = type('object')
         (data) => (data === undefined || Array.isArray(data) ? data : [data]),
         type(
           type('string').pipe((data, ctx) => {
-            const value = Number(data)
+            const value = /^-?(?:0|[1-9]\d*)$/.test(data) ? Number(data) : Number.NaN
             return Number.isSafeInteger(value) ? value : ctx.error('an integer')
           }),
         ).array(),
       ),
       'sort?': type('string')
         .pipe((data, ctx) => {
-          const value = Number(data)
-          return Number.isFinite(value) ? value : ctx.error('a number')
+          const value = /^-?(?:0|[1-9]\d*)$/.test(data) ? Number(data) : Number.NaN
+          return Number.isSafeInteger(value) ? value : ctx.error('an integer')
         })
         .to('1 | -1'),
       'active?': type(/^(?:true|1|yes|on|y|enabled|false|0|no|off|n|disabled)$/i)
@@ -35,7 +35,7 @@ export const Query = type('object')
         (data) => (data === 'null' ? null : data),
         type(
           type('string').pipe((data, ctx) => {
-            const value = Number(data)
+            const value = /^-?(?:0|[1-9]\d*)$/.test(data) ? Number(data) : Number.NaN
             return Number.isSafeInteger(value) ? value : ctx.error('an integer')
           }),
         ).or('null'),
@@ -47,20 +47,22 @@ export const Query = type('object')
         ),
       'offset?': type('string')
         .pipe((data, ctx) => {
-          const value = Number(data)
+          const value = /^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/.test(data)
+            ? Number(data)
+            : Number.NaN
           return Number.isFinite(value) ? value : ctx.error('a number')
         })
         .to('number >= 0'),
       'skip?': type('string')
         .pipe((data, ctx) => {
-          const value = Number(data)
+          const value = /^-?(?:0|[1-9]\d*)$/.test(data) ? Number(data) : Number.NaN
           return Number.isSafeInteger(value) ? value : ctx.error('an integer')
         })
         .narrow((data: unknown) => data !== 0),
       'flag?': type('unknown').pipe((data, ctx) => {
         for (const branch of [
           type('string').pipe((data, ctx) => {
-            const value = Number(data)
+            const value = /^-?(?:0|[1-9]\d*)$/.test(data) ? Number(data) : Number.NaN
             return Number.isSafeInteger(value) ? value : ctx.error('an integer')
           }),
           type(/^(?:true|1|yes|on|y|enabled|false|0|no|off|n|disabled)$/i).pipe((data) =>
@@ -73,7 +75,7 @@ export const Query = type('object')
         return ctx.error('one of the members')
       }),
       'constructor?': type('string').pipe((data, ctx) => {
-        const value = Number(data)
+        const value = /^-?(?:0|[1-9]\d*)$/.test(data) ? Number(data) : Number.NaN
         return Number.isSafeInteger(value) ? value : ctx.error('an integer')
       }),
       'email?': type('string.trim').to('string.email'),

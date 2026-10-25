@@ -642,13 +642,13 @@ describe('arktype', () => {
   describe('paramIn coercion', () => {
     it('query: number → "string.numeric.parse"', () => {
       expect(arktype({ type: 'number' }, 'Schema', false, { paramIn: 'query' })).toBe(
-        'type("string").pipe((data, ctx) => { const value = Number(data); return Number.isFinite(value) ? value : ctx.error("a number") })',
+        'type("string").pipe((data, ctx) => { const value = /^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$/.test(data) ? Number(data) : Number.NaN; return Number.isFinite(value) ? value : ctx.error("a number") })',
       )
     })
 
     it('query: integer → "string.integer.parse"', () => {
       expect(arktype({ type: 'integer' }, 'Schema', false, { paramIn: 'query' })).toBe(
-        'type("string").pipe((data, ctx) => { const value = Number(data); return Number.isSafeInteger(value) ? value : ctx.error("an integer") })',
+        'type("string").pipe((data, ctx) => { const value = /^-?(?:0|[1-9]\\d*)$/.test(data) ? Number(data) : Number.NaN; return Number.isSafeInteger(value) ? value : ctx.error("an integer") })',
       )
     })
 
@@ -672,7 +672,7 @@ describe('arktype', () => {
 
     it('query: integer with minimum → .to() constraint', () => {
       expect(arktype({ type: 'integer', minimum: 1 }, 'Schema', false, { paramIn: 'query' })).toBe(
-        'type("string").pipe((data, ctx) => { const value = Number(data); return Number.isSafeInteger(value) ? value : ctx.error("an integer") }).to("number.integer >= 1")',
+        'type("string").pipe((data, ctx) => { const value = /^-?(?:0|[1-9]\\d*)$/.test(data) ? Number(data) : Number.NaN; return Number.isSafeInteger(value) ? value : ctx.error("an integer") }).to("number.integer >= 1")',
       )
     })
 
@@ -682,13 +682,13 @@ describe('arktype', () => {
           paramIn: 'query',
         }),
       ).toBe(
-        'type("string").pipe((data, ctx) => { const value = Number(data); return Number.isSafeInteger(value) ? value : ctx.error("an integer") }).to("number.integer >= 1 & number.integer <= 100")',
+        'type("string").pipe((data, ctx) => { const value = /^-?(?:0|[1-9]\\d*)$/.test(data) ? Number(data) : Number.NaN; return Number.isSafeInteger(value) ? value : ctx.error("an integer") }).to("number.integer >= 1 & number.integer <= 100")',
       )
     })
 
     it('query: number with minimum → .to() constraint', () => {
       expect(arktype({ type: 'number', minimum: 0 }, 'Schema', false, { paramIn: 'query' })).toBe(
-        'type("string").pipe((data, ctx) => { const value = Number(data); return Number.isFinite(value) ? value : ctx.error("a number") }).to("number >= 0")',
+        'type("string").pipe((data, ctx) => { const value = /^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$/.test(data) ? Number(data) : Number.NaN; return Number.isFinite(value) ? value : ctx.error("a number") }).to("number >= 0")',
       )
     })
   })
@@ -738,12 +738,12 @@ describe('arktype', () => {
         // A `constructor` key in an object literal is checked against Object's own member.
         { type: 'object', properties: Object.fromEntries([['constructor', { type: 'integer' }]]) },
         { paramIn: 'query' },
-        'type("object").pipe((data)=>(typeof data==="object"&&data!==null&&!Array.isArray(data)?Object.assign(Object.create(null),data):data),type({"constructor?":type("string").pipe((data, ctx) => { const value = Number(data); return Number.isSafeInteger(value) ? value : ctx.error("an integer") })})).pipe((data) => ({ ...data }))',
+        'type("object").pipe((data)=>(typeof data==="object"&&data!==null&&!Array.isArray(data)?Object.assign(Object.create(null),data):data),type({"constructor?":type("string").pipe((data, ctx) => { const value = /^-?(?:0|[1-9]\\d*)$/.test(data) ? Number(data) : Number.NaN; return Number.isSafeInteger(value) ? value : ctx.error("an integer") })})).pipe((data) => ({ ...data }))',
       ],
       [
         { oneOf: [{ type: 'integer' }, { type: 'string' }] },
         { paramIn: 'path' },
-        'type("unknown").pipe((data, ctx) => { for (const branch of [type("string").pipe((data, ctx) => { const value = Number(data); return Number.isSafeInteger(value) ? value : ctx.error("an integer") }),type("string")]) { const out = branch(data); if (!(out instanceof type.errors)) return out } return ctx.error("one of the members") })',
+        'type("unknown").pipe((data, ctx) => { for (const branch of [type("string").pipe((data, ctx) => { const value = /^-?(?:0|[1-9]\\d*)$/.test(data) ? Number(data) : Number.NaN; return Number.isSafeInteger(value) ? value : ctx.error("an integer") }),type("string")]) { const out = branch(data); if (!(out instanceof type.errors)) return out } return ctx.error("one of the members") })',
       ],
       [
         {
@@ -753,12 +753,12 @@ describe('arktype', () => {
           ],
         },
         { paramIn: 'query' },
-        'type("string").pipe((data, ctx) => { const value = Number(data); return Number.isSafeInteger(value) ? value : ctx.error("an integer") }).to("number.integer >= 1 & number.integer <= 5")',
+        'type("string").pipe((data, ctx) => { const value = /^-?(?:0|[1-9]\\d*)$/.test(data) ? Number(data) : Number.NaN; return Number.isSafeInteger(value) ? value : ctx.error("an integer") }).to("number.integer >= 1 & number.integer <= 5")',
       ],
       [
         { anyOf: [{ type: 'number' }, { type: 'string' }] },
         { paramIn: 'query' },
-        'type("unknown").pipe((data, ctx) => { for (const branch of [type("string").pipe((data, ctx) => { const value = Number(data); return Number.isFinite(value) ? value : ctx.error("a number") }),type("string")]) { const out = branch(data); if (!(out instanceof type.errors)) return out } return ctx.error("one of the members") })',
+        'type("unknown").pipe((data, ctx) => { for (const branch of [type("string").pipe((data, ctx) => { const value = /^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$/.test(data) ? Number(data) : Number.NaN; return Number.isFinite(value) ? value : ctx.error("a number") }),type("string")]) { const out = branch(data); if (!(out instanceof type.errors)) return out } return ctx.error("one of the members") })',
       ],
     ])('arktype(%o, %o) → %s', (schema, options, expected) => {
       expect(arktype(schema, 'Schema', false, options)).toBe(expected)
@@ -770,42 +770,42 @@ describe('arktype', () => {
       [
         { type: 'number' },
         { paramIn: 'query' },
-        'type("string").pipe((data, ctx) => { const value = Number(data); return Number.isFinite(value) ? value : ctx.error("a number") })',
+        'type("string").pipe((data, ctx) => { const value = /^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$/.test(data) ? Number(data) : Number.NaN; return Number.isFinite(value) ? value : ctx.error("a number") })',
       ],
       [
         { type: 'integer' },
         { paramIn: 'query' },
-        'type("string").pipe((data, ctx) => { const value = Number(data); return Number.isSafeInteger(value) ? value : ctx.error("an integer") })',
+        'type("string").pipe((data, ctx) => { const value = /^-?(?:0|[1-9]\\d*)$/.test(data) ? Number(data) : Number.NaN; return Number.isSafeInteger(value) ? value : ctx.error("an integer") })',
       ],
       [
         { type: 'integer', minimum: 1, maximum: 100 },
         { paramIn: 'query' },
-        'type("string").pipe((data, ctx) => { const value = Number(data); return Number.isSafeInteger(value) ? value : ctx.error("an integer") }).to("number.integer >= 1 & number.integer <= 100")',
+        'type("string").pipe((data, ctx) => { const value = /^-?(?:0|[1-9]\\d*)$/.test(data) ? Number(data) : Number.NaN; return Number.isSafeInteger(value) ? value : ctx.error("an integer") }).to("number.integer >= 1 & number.integer <= 100")',
       ],
       [
         { type: 'integer', format: 'int32' },
         { paramIn: 'query' },
-        'type("string").pipe((data, ctx) => { const value = Number(data); return Number.isSafeInteger(value) ? value : ctx.error("an integer") }).to("number.integer >= -2147483648 & number.integer <= 2147483647")',
+        'type("string").pipe((data, ctx) => { const value = /^-?(?:0|[1-9]\\d*)$/.test(data) ? Number(data) : Number.NaN; return Number.isSafeInteger(value) ? value : ctx.error("an integer") }).to("number.integer >= -2147483648 & number.integer <= 2147483647")',
       ],
       [
         { type: 'number', format: 'float32' },
         undefined,
-        '"number >= -3.4028234663852886e38 & number <= 3.4028234663852886e38"',
+        'type("number").atLeast(-3.4028234663852886e38).atMost(3.4028234663852886e38)',
       ],
       [
         { type: 'array', items: { type: 'integer' } },
         { paramIn: 'query' },
-        'type("unknown").pipe((data)=>(data===undefined||Array.isArray(data)?data:[data]),type(type("string").pipe((data, ctx) => { const value = Number(data); return Number.isSafeInteger(value) ? value : ctx.error("an integer") })).array())',
+        'type("unknown").pipe((data)=>(data===undefined||Array.isArray(data)?data:[data]),type(type("string").pipe((data, ctx) => { const value = /^-?(?:0|[1-9]\\d*)$/.test(data) ? Number(data) : Number.NaN; return Number.isSafeInteger(value) ? value : ctx.error("an integer") })).array())',
       ],
       [
         { type: 'array', items: { type: 'integer' }, minItems: 1 },
         { paramIn: 'query' },
-        'type("unknown").pipe((data)=>(data===undefined||Array.isArray(data)?data:[data]),type(type(type("string").pipe((data, ctx) => { const value = Number(data); return Number.isSafeInteger(value) ? value : ctx.error("an integer") })).array()).and(type("unknown[] >= 1")))',
+        'type("unknown").pipe((data)=>(data===undefined||Array.isArray(data)?data:[data]),type(type(type("string").pipe((data, ctx) => { const value = /^-?(?:0|[1-9]\\d*)$/.test(data) ? Number(data) : Number.NaN; return Number.isSafeInteger(value) ? value : ctx.error("an integer") })).array()).and(type("unknown[] >= 1")))',
       ],
       [
         { type: 'integer', enum: [1, 2] },
         { paramIn: 'query' },
-        'type("string").pipe((data, ctx) => { const value = Number(data); return Number.isFinite(value) ? value : ctx.error("a number") }).to("1 | 2")',
+        'type("string").pipe((data, ctx) => { const value = /^-?(?:0|[1-9]\\d*)$/.test(data) ? Number(data) : Number.NaN; return Number.isSafeInteger(value) ? value : ctx.error("an integer") }).to("1 | 2")',
       ],
       [
         { type: 'boolean', const: true },
@@ -820,22 +820,22 @@ describe('arktype', () => {
       [
         { type: 'integer', nullable: true },
         { paramIn: 'query' },
-        'type("unknown").pipe((data)=>(data===\'null\'?null:data),type(type("string").pipe((data, ctx) => { const value = Number(data); return Number.isSafeInteger(value) ? value : ctx.error("an integer") })).or("null"))',
+        'type("unknown").pipe((data)=>(data===\'null\'?null:data),type(type("string").pipe((data, ctx) => { const value = /^-?(?:0|[1-9]\\d*)$/.test(data) ? Number(data) : Number.NaN; return Number.isSafeInteger(value) ? value : ctx.error("an integer") })).or("null"))',
       ],
       [
         { minimum: 1 },
         { paramIn: 'query' },
-        'type("string").pipe((data, ctx) => { const value = Number(data); return Number.isFinite(value) ? value : ctx.error("a number") }).to("number >= 1")',
+        'type("string").pipe((data, ctx) => { const value = /^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$/.test(data) ? Number(data) : Number.NaN; return Number.isFinite(value) ? value : ctx.error("a number") }).to("number >= 1")',
       ],
       [
         { type: 'integer', not: { const: 0 } },
         { paramIn: 'query' },
-        'type("string").pipe((data, ctx) => { const value = Number(data); return Number.isSafeInteger(value) ? value : ctx.error("an integer") }).narrow((data: unknown) => data !== 0)',
+        'type("string").pipe((data, ctx) => { const value = /^-?(?:0|[1-9]\\d*)$/.test(data) ? Number(data) : Number.NaN; return Number.isSafeInteger(value) ? value : ctx.error("an integer") }).narrow((data: unknown) => data !== 0)',
       ],
       [
         { type: ['integer', 'string'] },
         { paramIn: 'query' },
-        'type("unknown").pipe((data, ctx) => { for (const branch of [type("string").pipe((data, ctx) => { const value = Number(data); return Number.isSafeInteger(value) ? value : ctx.error("an integer") }),type("string")]) { const out = branch(data); if (!(out instanceof type.errors)) return out } return ctx.error("one of the members") })',
+        'type("unknown").pipe((data, ctx) => { for (const branch of [type("string").pipe((data, ctx) => { const value = /^-?(?:0|[1-9]\\d*)$/.test(data) ? Number(data) : Number.NaN; return Number.isSafeInteger(value) ? value : ctx.error("an integer") }),type("string")]) { const out = branch(data); if (!(out instanceof type.errors)) return out } return ctx.error("one of the members") })',
       ],
       [{ type: ['string', 'number'] }, undefined, '"string | number"'],
       [
@@ -902,12 +902,12 @@ describe('arktype', () => {
       [
         { type: 'array', items: { type: 'integer' } },
         { paramIn: 'query', explode: false },
-        'type("unknown").pipe((data)=>{if(typeof data!==\'string\')return data;const text=data;return (text===\'\'?[]:text.split(","))},type("unknown").pipe((data)=>(data===undefined||Array.isArray(data)?data:[data]),type(type("string").pipe((data, ctx) => { const value = Number(data); return Number.isSafeInteger(value) ? value : ctx.error("an integer") })).array()))',
+        'type("unknown").pipe((data)=>{if(typeof data!==\'string\')return data;const text=data;return (text===\'\'?[]:text.split(","))},type("unknown").pipe((data)=>(data===undefined||Array.isArray(data)?data:[data]),type(type("string").pipe((data, ctx) => { const value = /^-?(?:0|[1-9]\\d*)$/.test(data) ? Number(data) : Number.NaN; return Number.isSafeInteger(value) ? value : ctx.error("an integer") })).array()))',
       ],
       [
         { type: 'object', properties: { age: { type: 'integer' } } },
         { paramIn: 'query', style: 'deepObject' },
-        'type("unknown").pipe((data)=>{if(typeof data!==\'object\'||data===null||Array.isArray(data))return data;const out=Object.entries(data).reduce<{[k:string]:unknown}>((acc,[key,value])=>{const name=/^[^[\\]]+\\[([^\\]]+)\\]$/u.exec(key)?.[1];return name===undefined?acc:{...acc,[name]:value}},{});return Object.keys(out).length>0?out:data},type({"age?":type("string").pipe((data, ctx) => { const value = Number(data); return Number.isSafeInteger(value) ? value : ctx.error("an integer") })}))',
+        'type("unknown").pipe((data)=>{if(typeof data!==\'object\'||data===null||Array.isArray(data))return data;const out=Object.entries(data).reduce<{[k:string]:unknown}>((acc,[key,value])=>{const name=/^[^[\\]]+\\[([^\\]]+)\\]$/u.exec(key)?.[1];return name===undefined?acc:{...acc,[name]:value}},{});return Object.keys(out).length>0?out:data},type({"age?":type("string").pipe((data, ctx) => { const value = /^-?(?:0|[1-9]\\d*)$/.test(data) ? Number(data) : Number.NaN; return Number.isSafeInteger(value) ? value : ctx.error("an integer") })}))',
       ],
       [
         { type: 'object', properties: { id: { type: 'integer' } } },
@@ -934,5 +934,23 @@ describe('arktype', () => {
     ])('arktype(%o, %o) → %s', (schema, options, expected) => {
       expect(arktype(schema, 'Schema', false, options)).toBe(expected)
     })
+  })
+})
+
+describe('allOf keyword members', () => {
+  it.concurrent.each<[JSONSchema, EmitOptions | undefined, string]>([
+    [{ allOf: [{ type: 'integer' }, { minimum: 5 }] }, undefined, '"number.integer >= 5"'],
+    [
+      { allOf: [{ minimum: 5 }] },
+      undefined,
+      'type("unknown").narrow((data) => (typeof data !== \'number\' || (data >= 5)))',
+    ],
+    [
+      { allOf: [{ type: 'integer' }, { minimum: 5 }] },
+      { paramIn: 'query' },
+      'type("string").pipe((data, ctx) => { const value = /^-?(?:0|[1-9]\\d*)$/.test(data) ? Number(data) : Number.NaN; return Number.isSafeInteger(value) ? value : ctx.error("an integer") }).to("number.integer >= 5")',
+    ],
+  ])('arktype(%o, %o) → %s', (schema, options, expected) => {
+    expect(arktype(schema, 'Schema', false, options)).toBe(expected)
   })
 })

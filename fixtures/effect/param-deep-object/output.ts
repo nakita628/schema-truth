@@ -17,7 +17,17 @@ export const Filter = Schema.Unknown.pipe(
   ),
   Schema.decodeTo(
     Schema.Struct({
-      age: Schema.FiniteFromString.check(Schema.isInt()),
+      age: Schema.String.check(Schema.isPattern(/^-?(?:0|[1-9]\d*)$/))
+        .pipe(
+          Schema.decodeTo(
+            Schema.Finite,
+            SchemaTransformation.transform({
+              decode: (input) => Number(input),
+              encode: (output) => String(output),
+            }),
+          ),
+        )
+        .check(Schema.isInt()),
       name: Schema.optional(Schema.String),
     }),
   ),

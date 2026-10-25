@@ -996,7 +996,7 @@ describe('effect', () => {
   describe('paramIn coercion', () => {
     it('query: number → Schema.NumberFromString', () => {
       expect(effect({ type: 'number' }, 'Schema', false, { paramIn: 'query' })).toBe(
-        'Schema.FiniteFromString',
+        'Schema.String.check(Schema.isPattern(/^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$/)).pipe(Schema.decodeTo(Schema.Finite,SchemaTransformation.transform({decode:(input)=>Number(input),encode:(output)=>String(output)})))',
       )
     })
 
@@ -1148,7 +1148,7 @@ describe('effect contains / minContains / maxContains', () => {
       [
         { type: 'integer', default: 1 },
         { paramIn: 'query' },
-        'Schema.FiniteFromString.check(Schema.isInt()).pipe(Schema.withDecodingDefaultType(Effect.succeed(1)))',
+        'Schema.String.check(Schema.isPattern(/^-?(?:0|[1-9]\\d*)$/)).pipe(Schema.decodeTo(Schema.Finite,SchemaTransformation.transform({decode:(input)=>Number(input),encode:(output)=>String(output)}))).check(Schema.isInt()).pipe(Schema.withDecodingDefaultType(Effect.succeed(1)))',
       ],
       [
         { type: 'boolean', default: true },
@@ -1158,7 +1158,7 @@ describe('effect contains / minContains / maxContains', () => {
       [
         { type: 'array', items: { type: 'integer' }, default: [1, 2] },
         { paramIn: 'query' },
-        'Schema.Unknown.pipe(Schema.decodeTo(Schema.Unknown,SchemaTransformation.transform<unknown,unknown>({decode:(input)=>(input===undefined||Array.isArray(input)?input:[input]),encode:(output)=>output})),Schema.decodeTo(Schema.Array(Schema.FiniteFromString.check(Schema.isInt())))).pipe(Schema.withDecodingDefaultType(Effect.succeed([1,2])))',
+        'Schema.Unknown.pipe(Schema.decodeTo(Schema.Unknown,SchemaTransformation.transform<unknown,unknown>({decode:(input)=>(input===undefined||Array.isArray(input)?input:[input]),encode:(output)=>output})),Schema.decodeTo(Schema.Array(Schema.String.check(Schema.isPattern(/^-?(?:0|[1-9]\\d*)$/)).pipe(Schema.decodeTo(Schema.Finite,SchemaTransformation.transform({decode:(input)=>Number(input),encode:(output)=>String(output)}))).check(Schema.isInt())))).pipe(Schema.withDecodingDefaultType(Effect.succeed([1,2])))',
       ],
       [
         { type: 'string', format: 'ipv6' },
@@ -1183,17 +1183,25 @@ describe('effect contains / minContains / maxContains', () => {
 
   describe('#104: the wire-parameter coercion of #96, and a guarded NumberFromString', () => {
     it.concurrent.each<[JSONSchema, EmitOptions | undefined, string]>([
-      [{ type: 'number' }, { paramIn: 'query' }, 'Schema.FiniteFromString'],
-      [{ type: 'integer' }, { paramIn: 'query' }, 'Schema.FiniteFromString.check(Schema.isInt())'],
+      [
+        { type: 'number' },
+        { paramIn: 'query' },
+        'Schema.String.check(Schema.isPattern(/^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$/)).pipe(Schema.decodeTo(Schema.Finite,SchemaTransformation.transform({decode:(input)=>Number(input),encode:(output)=>String(output)})))',
+      ],
+      [
+        { type: 'integer' },
+        { paramIn: 'query' },
+        'Schema.String.check(Schema.isPattern(/^-?(?:0|[1-9]\\d*)$/)).pipe(Schema.decodeTo(Schema.Finite,SchemaTransformation.transform({decode:(input)=>Number(input),encode:(output)=>String(output)}))).check(Schema.isInt())',
+      ],
       [
         { type: 'array', items: { type: 'integer' } },
         { paramIn: 'query' },
-        'Schema.Unknown.pipe(Schema.decodeTo(Schema.Unknown,SchemaTransformation.transform<unknown,unknown>({decode:(input)=>(input===undefined||Array.isArray(input)?input:[input]),encode:(output)=>output})),Schema.decodeTo(Schema.Array(Schema.FiniteFromString.check(Schema.isInt()))))',
+        'Schema.Unknown.pipe(Schema.decodeTo(Schema.Unknown,SchemaTransformation.transform<unknown,unknown>({decode:(input)=>(input===undefined||Array.isArray(input)?input:[input]),encode:(output)=>output})),Schema.decodeTo(Schema.Array(Schema.String.check(Schema.isPattern(/^-?(?:0|[1-9]\\d*)$/)).pipe(Schema.decodeTo(Schema.Finite,SchemaTransformation.transform({decode:(input)=>Number(input),encode:(output)=>String(output)}))).check(Schema.isInt()))))',
       ],
       [
         { type: 'integer', enum: [1, 2] },
         { paramIn: 'query' },
-        'Schema.FiniteFromString.pipe(Schema.decodeTo(Schema.Literals([1,2])))',
+        'Schema.String.check(Schema.isPattern(/^-?(?:0|[1-9]\\d*)$/)).pipe(Schema.decodeTo(Schema.Finite,SchemaTransformation.transform({decode:(input)=>Number(input),encode:(output)=>String(output)}))).pipe(Schema.decodeTo(Schema.Literals([1,2])))',
       ],
       [
         { type: 'boolean', const: true },
@@ -1203,22 +1211,22 @@ describe('effect contains / minContains / maxContains', () => {
       [
         { type: 'integer', nullable: true },
         { paramIn: 'query' },
-        "Schema.Unknown.pipe(Schema.decodeTo(Schema.Unknown,SchemaTransformation.transform<unknown,unknown>({decode:(input)=>(input==='null'?null:input),encode:(output)=>output})),Schema.decodeTo(Schema.NullOr(Schema.FiniteFromString.check(Schema.isInt()))))",
+        "Schema.Unknown.pipe(Schema.decodeTo(Schema.Unknown,SchemaTransformation.transform<unknown,unknown>({decode:(input)=>(input==='null'?null:input),encode:(output)=>output})),Schema.decodeTo(Schema.NullOr(Schema.String.check(Schema.isPattern(/^-?(?:0|[1-9]\\d*)$/)).pipe(Schema.decodeTo(Schema.Finite,SchemaTransformation.transform({decode:(input)=>Number(input),encode:(output)=>String(output)}))).check(Schema.isInt()))))",
       ],
       [
         { minimum: 1 },
         { paramIn: 'query' },
-        'Schema.FiniteFromString.check(Schema.isGreaterThanOrEqualTo(1))',
+        'Schema.String.check(Schema.isPattern(/^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$/)).pipe(Schema.decodeTo(Schema.Finite,SchemaTransformation.transform({decode:(input)=>Number(input),encode:(output)=>String(output)}))).check(Schema.isGreaterThanOrEqualTo(1))',
       ],
       [
         { type: 'integer', not: { const: 0 } },
         { paramIn: 'query' },
-        'Schema.FiniteFromString.check(Schema.isInt()).check(Schema.makeFilter((input) => input !== 0))',
+        'Schema.String.check(Schema.isPattern(/^-?(?:0|[1-9]\\d*)$/)).pipe(Schema.decodeTo(Schema.Finite,SchemaTransformation.transform({decode:(input)=>Number(input),encode:(output)=>String(output)}))).check(Schema.isInt()).check(Schema.makeFilter((input) => input !== 0))',
       ],
       [
         { type: ['number', 'boolean'] },
         { paramIn: 'query' },
-        'Schema.Union([Schema.FiniteFromString,Schema.String.check(Schema.isPattern(/^(?:true|1|yes|on|y|enabled|false|0|no|off|n|disabled)$/i)).pipe(Schema.decodeTo(Schema.Boolean,SchemaTransformation.transform({decode:(input)=>/^(?:true|1|yes|on|y|enabled)$/i.test(input),encode:(output)=>output?"true":"false"})))])',
+        'Schema.Union([Schema.String.check(Schema.isPattern(/^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$/)).pipe(Schema.decodeTo(Schema.Finite,SchemaTransformation.transform({decode:(input)=>Number(input),encode:(output)=>String(output)}))),Schema.String.check(Schema.isPattern(/^(?:true|1|yes|on|y|enabled|false|0|no|off|n|disabled)$/i)).pipe(Schema.decodeTo(Schema.Boolean,SchemaTransformation.transform({decode:(input)=>/^(?:true|1|yes|on|y|enabled)$/i.test(input),encode:(output)=>output?"true":"false"})))])',
       ],
       [
         { type: 'integer', format: 'int64' },
@@ -1239,7 +1247,7 @@ describe('effect contains / minContains / maxContains', () => {
       [
         { type: 'integer', format: 'uint32' },
         { paramIn: 'query' },
-        'Schema.FiniteFromString.check(Schema.isUint32())',
+        'Schema.String.check(Schema.isPattern(/^-?(?:0|[1-9]\\d*)$/)).pipe(Schema.decodeTo(Schema.Finite,SchemaTransformation.transform({decode:(input)=>Number(input),encode:(output)=>String(output)}))).check(Schema.isUint32())',
       ],
       [
         { type: 'number', format: 'float32' },
@@ -1339,7 +1347,7 @@ describe('effect contains / minContains / maxContains', () => {
         // A `constructor` key in an object literal is checked against Object's own member.
         { type: 'object', properties: Object.fromEntries([['constructor', { type: 'integer' }]]) },
         { paramIn: 'query' },
-        'Schema.Unknown.pipe(Schema.decodeTo(Schema.Unknown,SchemaTransformation.transform<unknown,unknown>({decode:(input)=>(typeof input==="object"&&input!==null&&!Array.isArray(input)?Object.assign(Object.create(null),input):input),encode:(output)=>output})),Schema.decodeTo(Schema.Struct({constructor:Schema.optional(Schema.FiniteFromString.check(Schema.isInt()))})))',
+        'Schema.Unknown.pipe(Schema.decodeTo(Schema.Unknown,SchemaTransformation.transform<unknown,unknown>({decode:(input)=>(typeof input==="object"&&input!==null&&!Array.isArray(input)?Object.assign(Object.create(null),input):input),encode:(output)=>output})),Schema.decodeTo(Schema.Struct({constructor:Schema.optional(Schema.String.check(Schema.isPattern(/^-?(?:0|[1-9]\\d*)$/)).pipe(Schema.decodeTo(Schema.Finite,SchemaTransformation.transform({decode:(input)=>Number(input),encode:(output)=>String(output)}))).check(Schema.isInt()))})))',
       ],
       [
         { type: 'string', format: 'date' },
@@ -1369,12 +1377,12 @@ describe('effect contains / minContains / maxContains', () => {
       [
         { type: 'array', items: { type: 'integer' } },
         { paramIn: 'query', explode: false },
-        "Schema.Unknown.pipe(Schema.decodeTo(Schema.Unknown,SchemaTransformation.transform<unknown,unknown>({decode:(input)=>{if(typeof input!=='string')return input;const text=input;return (text===''?[]:text.split(\",\"))},encode:(output)=>output})),Schema.decodeTo(Schema.Unknown.pipe(Schema.decodeTo(Schema.Unknown,SchemaTransformation.transform<unknown,unknown>({decode:(input)=>(input===undefined||Array.isArray(input)?input:[input]),encode:(output)=>output})),Schema.decodeTo(Schema.Array(Schema.FiniteFromString.check(Schema.isInt()))))))",
+        "Schema.Unknown.pipe(Schema.decodeTo(Schema.Unknown,SchemaTransformation.transform<unknown,unknown>({decode:(input)=>{if(typeof input!=='string')return input;const text=input;return (text===''?[]:text.split(\",\"))},encode:(output)=>output})),Schema.decodeTo(Schema.Unknown.pipe(Schema.decodeTo(Schema.Unknown,SchemaTransformation.transform<unknown,unknown>({decode:(input)=>(input===undefined||Array.isArray(input)?input:[input]),encode:(output)=>output})),Schema.decodeTo(Schema.Array(Schema.String.check(Schema.isPattern(/^-?(?:0|[1-9]\\d*)$/)).pipe(Schema.decodeTo(Schema.Finite,SchemaTransformation.transform({decode:(input)=>Number(input),encode:(output)=>String(output)}))).check(Schema.isInt()))))))",
       ],
       [
         { type: 'object', properties: { age: { type: 'integer' } } },
         { paramIn: 'query', style: 'deepObject' },
-        "Schema.Unknown.pipe(Schema.decodeTo(Schema.Unknown,SchemaTransformation.transform<unknown,unknown>({decode:(input)=>{if(typeof input!=='object'||input===null||Array.isArray(input))return input;const out=Object.entries(input).reduce<{[k:string]:unknown}>((acc,[key,value])=>{const name=/^[^[\\]]+\\[([^\\]]+)\\]$/u.exec(key)?.[1];return name===undefined?acc:{...acc,[name]:value}},{});return Object.keys(out).length>0?out:input},encode:(output)=>output})),Schema.decodeTo(Schema.Struct({age:Schema.optional(Schema.FiniteFromString.check(Schema.isInt()))})))",
+        "Schema.Unknown.pipe(Schema.decodeTo(Schema.Unknown,SchemaTransformation.transform<unknown,unknown>({decode:(input)=>{if(typeof input!=='object'||input===null||Array.isArray(input))return input;const out=Object.entries(input).reduce<{[k:string]:unknown}>((acc,[key,value])=>{const name=/^[^[\\]]+\\[([^\\]]+)\\]$/u.exec(key)?.[1];return name===undefined?acc:{...acc,[name]:value}},{});return Object.keys(out).length>0?out:input},encode:(output)=>output})),Schema.decodeTo(Schema.Struct({age:Schema.optional(Schema.String.check(Schema.isPattern(/^-?(?:0|[1-9]\\d*)$/)).pipe(Schema.decodeTo(Schema.Finite,SchemaTransformation.transform({decode:(input)=>Number(input),encode:(output)=>String(output)}))).check(Schema.isInt()))})))",
       ],
       [
         { type: 'object', properties: { id: { type: 'integer' } } },
@@ -1421,5 +1429,27 @@ describe('effect contains / minContains / maxContains', () => {
     ])('effect(%o, %o) → %s', (schema, options, expected) => {
       expect(effect(schema, 'Schema', false, options)).toBe(expected)
     })
+  })
+})
+
+describe('allOf keyword members', () => {
+  it.concurrent.each<[JSONSchema, EmitOptions | undefined, string]>([
+    [
+      { allOf: [{ type: 'integer' }, { minimum: 5 }] },
+      undefined,
+      'Schema.Number.check(Schema.isInt(),Schema.isGreaterThanOrEqualTo(5))',
+    ],
+    [
+      { allOf: [{ minimum: 5 }] },
+      undefined,
+      "Schema.Unknown.check(Schema.makeFilter((input) => (typeof input !== 'number' || (input >= 5))))",
+    ],
+    [
+      { allOf: [{ type: 'integer' }, { minimum: 5 }] },
+      { paramIn: 'query' },
+      'Schema.String.check(Schema.isPattern(/^-?(?:0|[1-9]\\d*)$/)).pipe(Schema.decodeTo(Schema.Finite,SchemaTransformation.transform({decode:(input)=>Number(input),encode:(output)=>String(output)}))).check(Schema.isInt(),Schema.isGreaterThanOrEqualTo(5))',
+    ],
+  ])('effect(%o, %o) → %s', (schema, options, expected) => {
+    expect(effect(schema, 'Schema', false, options)).toBe(expected)
   })
 })

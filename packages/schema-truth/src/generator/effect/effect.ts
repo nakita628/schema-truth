@@ -9,10 +9,14 @@ import {
   isStringWireLocation,
 } from '../../guard/index.js'
 import {
+  constraintMessage,
+  constraintPredicate,
   effectPreprocess,
   effectWrap as _effectWrap,
+  foldAllOfMembers,
   hasParameterSerialization,
   impliedWireType,
+  isKeywordOnlyMember,
   isNullTextRead,
   isPrimitiveUnion,
   itemsSchemaOf,
@@ -24,6 +28,7 @@ import {
   stringboolTruthyPattern,
   unionPrimitiveTypes,
   wireArrayOnce,
+  wireNumericKind,
   withoutParameterSerialization,
 } from '../../helper/index.js'
 import type { EffectWrapOptions } from '../../helper/index.js'
@@ -32,7 +37,7 @@ import type { JSONSchema } from '../../parser/index.js'
 import { effectError, effectErrorPart, normalizeTypes } from '../../utils/index.js'
 import { _enum } from './enum.js'
 import { int64Input, integer, isInt64 } from './integer.js'
-import { number } from './number.js'
+import { number, wireNumericInput } from './number.js'
 import { object } from './object.js'
 import { string } from './string.js'
 
@@ -114,6 +119,12 @@ export function effect(
   return node(schema, rootName, isEffect, options)
 }
 
+/** A keyword-only `allOf` member: the keywords apply when the value has their type. */
+function keywordConstraint(schema: JSONSchema): string {
+  const body = constraintPredicate(schema, 'input')
+  return `Schema.Unknown.check(Schema.makeFilter((input) => ${body}${effectErrorPart(constraintMessage(schema))}))`
+}
+
 function node(
   schema: JSONSchema,
   rootName: string,
@@ -139,7 +150,7 @@ function node(
   const literalInput = (values: readonly unknown[]): string | undefined => {
     if (values.every((v) => typeof v === 'number')) {
       if (isInt64(schema)) return int64Input(isWireCoerced)
-      if (isWireCoerced) return 'Schema.FiniteFromString'
+      if (isWireCoerced) return wireNumericInput(wireNumericKind(schema, values))
     }
     if (isWireCoerced && values.every((v) => typeof v === 'boolean')) return stringbool()
     return undefined
@@ -194,9 +205,12 @@ function node(
     if (schema.allOf.length === 0) return effectWrap('Schema.Unknown', schema)
     const nullable = isNullable(schema) || schema.allOf.some(isNullTypeMember)
     const defaultValue = schema.allOf.find(isDefaultOnlyMember)?.default
-    const schemas = schema.allOf
-      .filter((s) => !isShapelessMember(s))
-      .map((s) => effect(s, rootName, isEffect, options))
+    const schemas = foldAllOfMembers(
+      schema.allOf.filter((s) => !isShapelessMember(s)),
+      isWireCoerced,
+    ).map((s) =>
+      isKeywordOnlyMember(s) ? keywordConstraint(s) : effect(s, rootName, isEffect, options),
+    )
     if (schemas.length === 0) return effectWrap('Schema.Unknown', { ...schema, nullable })
     const intersected = schemas.length === 1 ? schemas[0] : intersect(schemas)
     const allOfMessage = schema['x-allOf-message']

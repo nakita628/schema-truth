@@ -2,6 +2,7 @@ import { Result, Schema } from 'effect'
 import { describe, expect, it } from 'vite-plus/test'
 
 import { Config as AdditionalPropsConfig } from '../additional-properties/output.ts'
+import { Bounded } from '../allof-keyword/output.ts'
 import { Combined } from '../allof/output.ts'
 import { Merged } from '../allof-message/output.ts'
 import { StringOrNumber } from '../anyof/output.ts'
@@ -108,6 +109,14 @@ describe('allof runtime', () => {
           'Expected number\n  at ["age"]',
       })
     }
+  })
+})
+
+describe('allof-keyword runtime', () => {
+  it('keeps a minimum folded onto the integer', () => {
+    expect(Schema.decodeUnknownSync(Bounded)(5)).toBe(5)
+    expect(Result.isSuccess(decode(Bounded, 3))).toBe(false)
+    expect(Result.isSuccess(decode(Bounded, 5.5))).toBe(false)
   })
 })
 
@@ -596,6 +605,11 @@ describe('wire-query runtime', () => {
     expect(Result.isSuccess(decode(WireQuery, { page: '1', offset: '1e309' }))).toBe(false)
     expect(Result.isSuccess(decode(WireQuery, { page: '1', offset: 'not-a-value' }))).toBe(false)
     expect(Result.isSuccess(decode(WireQuery, { page: '1', skip: '1.5' }))).toBe(false)
+    expect(Result.isSuccess(decode(WireQuery, { page: '007' }))).toBe(false)
+    expect(Result.isSuccess(decode(WireQuery, { page: '1', skip: '1.0' }))).toBe(false)
+    expect(Result.isSuccess(decode(WireQuery, { page: '1', skip: '1e3' }))).toBe(false)
+    expect(Result.isSuccess(decode(WireQuery, { page: '1', offset: '0x10' }))).toBe(false)
+    expect(Result.isSuccess(decode(WireQuery, { page: '1', offset: '' }))).toBe(false)
   })
 
   it.each([
