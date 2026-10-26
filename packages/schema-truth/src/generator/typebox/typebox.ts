@@ -1,5 +1,7 @@
 import { DEFAULT_ROOT_NAME, DEFINITION_REF_PREFIXES } from '../../constants/index.js'
 import {
+  hasNumericKeyword,
+  hasStringKeyword,
   isDeepLocalPointer,
   isDefaultOnlyMember,
   isNullable,
@@ -8,7 +10,17 @@ import {
   isShapelessMember,
   isStringWireLocation,
 } from '../../guard/index.js'
-import { itemsSchemaOf, schemaNamer, typeboxWrap } from '../../helper/index.js'
+import {
+  foldAllOfMembers,
+  integerWirePattern,
+  isKeywordOnlyMember,
+  itemsSchemaOf,
+  numberWirePattern,
+  schemaNamer,
+  stringboolPattern,
+  stringboolTruthyPattern,
+  typeboxWrap,
+} from '../../helper/index.js'
 import { typeboxDefaultOpt, typeboxMetaOpts, typeboxRefOpt } from '../../helper/meta.js'
 import type { JSONSchema, ParamIn } from '../../parser/index.js'
 import { normalizeTypes, resolveOpenAPIRef } from '../../utils/index.js'
@@ -77,9 +89,24 @@ function tbPrim(
  * Codec decodes from a string. A host `ref` lands on this inner `Type.String`,
  * not on the `Codec(...)` wrapper.
  */
-function wireString(schema: JSONSchema, ref?: string): string {
-  const opts = [...typeboxRefOpt(ref), ...typeboxDefaultOpt(schema, true)]
+function wireString(schema: JSONSchema, ref?: string, pattern?: string): string {
+  const opts = [
+    ...typeboxRefOpt(ref),
+    ...(pattern === undefined ? [] : [`pattern:${pattern}`]),
+    ...typeboxDefaultOpt(schema, true),
+  ]
   return opts.length > 0 ? `Type.String({${opts.join(',')}})` : 'Type.String()'
+}
+
+/** A keyword-only `allOf` member. TypeBox has no type-guarded check, so the keyword's type carries it. */
+function keywordSchema(schema: JSONSchema): string {
+  if (hasStringKeyword(schema) && !hasNumericKeyword(schema)) {
+    return string({ ...schema, type: 'string' })
+  }
+  if (hasNumericKeyword(schema) && !hasStringKeyword(schema)) {
+    return number({ ...schema, type: 'number' })
+  }
+  return 'Type.Any()'
 }
 
 /**
@@ -199,9 +226,12 @@ export function typebox(
     }
     const nullable = isNullable(schema) || schema.allOf.some(isNullTypeMember)
     const defaultValue = schema.allOf.find(isDefaultOnlyMember)?.default
-    const schemas = schema.allOf
-      .filter((s) => !isShapelessMember(s))
-      .map((s) => typebox(s, rootName, isTypebox, childOptions))
+    const schemas = foldAllOfMembers(
+      schema.allOf.filter((s) => !isShapelessMember(s)),
+      isStringWireParam,
+    ).map((s) =>
+      isKeywordOnlyMember(s) ? keywordSchema(s) : typebox(s, rootName, isTypebox, childOptions),
+    )
     if (schemas.length === 0) {
       return typeboxWrap(tbPrim('Type.Any', schema, [], hostRef), { ...schema, nullable })
     }
@@ -281,7 +311,7 @@ export function typebox(
   if (types.includes('number')) {
     const base = number(schema, hostRef)
     if (isStringWireParam) {
-      const wire = wireString(schema, hostRef)
+      const wire = wireString(schema, hostRef, numberWirePattern())
       return typeboxWrap(
         `Codec(${wire}).Decode((value)=>Number(value)).Encode((value)=>String(value))`,
         schema,
@@ -292,9 +322,9 @@ export function typebox(
   if (types.includes('integer')) {
     const base = integer(schema, hostRef)
     if (isStringWireParam) {
-      const wire = wireString(schema, hostRef)
+      const wire = wireString(schema, hostRef, integerWirePattern())
       return typeboxWrap(
-        `Codec(${wire}).Decode((value)=>Number.parseInt(value,10)).Encode((value)=>String(value))`,
+        `Codec(${wire}).Decode((value)=>Number(value)).Encode((value)=>String(value))`,
         schema,
       )
     }
@@ -302,13 +332,9 @@ export function typebox(
   }
   if (types.includes('boolean')) {
     if (isStringWireParam) {
-      const unionOpts = [...typeboxRefOpt(hostRef), ...typeboxDefaultOpt(schema, true)]
-      const union =
-        unionOpts.length > 0
-          ? `Type.Union([Type.Literal('true'),Type.Literal('false')],{${unionOpts.join(',')}})`
-          : `Type.Union([Type.Literal('true'),Type.Literal('false')])`
+      const wire = wireString(schema, hostRef, stringboolPattern())
       return typeboxWrap(
-        `Codec(${union}).Decode((value)=>value==='true').Encode((value)=>value?'true':'false')`,
+        `Codec(${wire}).Decode((value)=>${stringboolTruthyPattern()}.test(value)).Encode((value)=>value?'true':'false')`,
         schema,
       )
     }
@@ -404,6 +430,11 @@ export function typebox(
   }
   if (types.length === 1 && types[0] === 'null') {
     return typeboxWrap(tbPrim('Type.Null', schema, [], hostRef), schema)
+  }
+
+  // An `allOf` member that is only `additionalProperties` still constrains every value.
+  if (typeof schema.additionalProperties === 'object') {
+    return readonly(typeboxWrap(object(schema, rootName, isTypebox, options), schema))
   }
 
   return typeboxWrap(tbPrim('Type.Any', schema, [], hostRef), schema)

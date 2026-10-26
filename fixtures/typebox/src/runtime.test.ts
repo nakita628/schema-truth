@@ -2,6 +2,8 @@ import { Value } from 'typebox/value'
 import { describe, expect, it } from 'vite-plus/test'
 import { User as DefsUser } from '../$defs/output.ts'
 import { Config as AdditionalConfig } from '../additional-properties/output.ts'
+import { Bounded } from '../allof-keyword/output.ts'
+import { Metadata } from '../pattern-hex/output.ts'
 import { Combined as AllofCombined } from '../allof/output.ts'
 import { StringOrNumber as AnyofStringOrNumber } from '../anyof/output.ts'
 import { A as CircularA } from '../circular/output.ts'
@@ -184,6 +186,20 @@ describe('allof', () => {
         message: 'must have required properties age',
       },
     ])
+  })
+})
+
+describe('pattern-hex', () => {
+  it('treats a braced hex escape as a unicode range', () => {
+    expect(Value.Check(Metadata, 'あ')).toBe(true)
+  })
+})
+
+describe('allof-keyword', () => {
+  it('keeps a minimum folded onto the integer', () => {
+    expect(Value.Check(Bounded, 5)).toBe(true)
+    expect(Value.Check(Bounded, 3)).toBe(false)
+    expect(Value.Check(Bounded, 5.5)).toBe(false)
   })
 })
 

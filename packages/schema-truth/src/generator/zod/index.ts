@@ -1,5 +1,6 @@
 import { UNSAFE_GENERATED_MARKER } from '../../constants/index.js'
 import {
+  definitionsOf,
   emitOptionsOf,
   findCodeExtensionKeysInSchema,
   hasRootSelfReference,
@@ -19,11 +20,13 @@ import { zod } from './zod.js'
  */
 export function schemaToZod(schema: JSONSchema, options?: GenerateOptions): string {
   const exportType = options?.exportType ?? true
-  const emitOptions = emitOptionsOf(options)
+  const baseOptions = emitOptionsOf(options)
   const codeExtensionsPresent =
-    emitOptions.unsafeCodeExtensions === true && findCodeExtensionKeysInSchema(schema).length > 0
-  const toName = schemaNamer(emitOptions.openapi)
+    baseOptions.unsafeCodeExtensions === true && findCodeExtensionKeysInSchema(schema).length > 0
+  const toName = schemaNamer(baseOptions.openapi)
   const plan = planDocument(schema, rootNameOf(schema, toName))
+  const definitions = definitionsOf(baseOptions, plan.definitions)
+  const emitOptions = definitions === undefined ? baseOptions : { ...baseOptions, definitions }
   const { rootName } = plan
   const needsTypeDef = plan.hasDefinitions || hasRootSelfReference(schema)
 

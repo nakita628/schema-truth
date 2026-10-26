@@ -19,13 +19,19 @@ import {
 import {
   arktypePreprocess,
   arktypeWrap as _arktypeWrap,
+  constraintMessage,
+  constraintPredicate,
+  foldAllOfMembers,
   hasParameterSerialization,
   impliedWireType,
+  isKeywordOnlyMember,
   isNullMatchedFirst,
   isNullTextRead,
   isPrimitiveUnion,
   itemsSchemaOf,
+  isBigintFormat,
   notPredicate,
+  valueListLiteral,
   parameterReaders,
   schemaNamer,
   stringboolPattern,
@@ -33,6 +39,7 @@ import {
   unionPrimitiveTypes,
   wireArrayOnce,
   wireNullText,
+  wireNumericKind,
   withoutParameterSerialization,
 } from '../../helper/index.js'
 import type { ArktypeWrapOptions } from '../../helper/index.js'
@@ -101,6 +108,14 @@ function wireNumeric(morph: string, inner: string): string {
 /** The boolean spellings of the wire, read into a boolean as `z.stringbool()` reads them. */
 function stringbool(): string {
   return `type(${stringboolPattern()}).pipe((data) => ${stringboolTruthyPattern()}.test(data))`
+}
+
+/** A keyword-only `allOf` member: the keywords apply when the value has their type. */
+function keywordConstraint(schema: JSONSchema): string {
+  const body = constraintPredicate(schema, 'data')
+  const message = constraintMessage(schema)
+  if (message === undefined) return `type("unknown").narrow((data) => ${body})`
+  return `type("unknown").narrow((data, ctx) => (${body}) || ctx.mustBe(${JSON.stringify(message)}))`
 }
 
 function formatConst(value: unknown, isBigint: boolean): string {
@@ -174,7 +189,11 @@ function node(
   const literalInput = (values: readonly unknown[]): string | undefined => {
     if (values.every((v) => typeof v === 'number')) {
       if (isInt64(schema)) return bigintMorph(isWireCoerced)
-      if (isWireCoerced) return numberMorph('isFinite', 'a number')
+      if (isWireCoerced) {
+        return wireNumericKind(schema, values) === 'integer'
+          ? numberMorph('isSafeInteger', 'an integer')
+          : numberMorph('isFinite', 'a number')
+      }
     }
     if (isWireCoerced && values.every((v) => typeof v === 'boolean')) return stringbool()
     return undefined
@@ -243,29 +262,35 @@ function node(
   if (schema.allOf) {
     if (schema.allOf.length === 0) return arktypeWrap('"unknown"', schema)
     const nullable = isNullable(schema) || schema.allOf.some(isNullTypeMember)
-    const members = schema.allOf.filter((s) => !isShapelessMember(s))
-    // ArkType refuses an intersection of two morphs, so the constraints of numeric wire
-    // members are merged under one: `morph.to("number >= 1 & number <= 5")`.
+    const members = foldAllOfMembers(
+      schema.allOf.filter((s) => !isShapelessMember(s)),
+      isWireCoerced,
+    )
+    // ArkType refuses an intersection of two morphs, so numeric wire members share one
+    // morph: `morph.to("number >= 1 & number <= 5")`. Keyword-only members are folded
+    // into that member first, so `{ minimum: 5 }` is not a second morph.
     if (isWireCoerced && members.length > 0 && members.every(isNumericMember)) {
       const definitions = members.map((s) => (s.type === 'integer' ? integer(s) : number(s)))
-      if (definitions.every(isQuoted)) {
-        const isInteger = members.some((s) => s.type === 'integer')
-        const parts = definitions
-          .map((d) => d.slice(1, -1))
-          .filter((d) => d !== 'number' && d !== 'number.integer')
-        const merged =
-          parts.length === 0
-            ? isInteger
-              ? '"number.integer"'
-              : '"number"'
-            : `"${parts.join(' & ')}"`
-        const morph = isInteger
-          ? numberMorph('isSafeInteger', 'an integer')
-          : numberMorph('isFinite', 'a number')
-        return arktypeWrap(wireNumeric(morph, merged), { ...schema, nullable })
-      }
+      const isInteger = members.some((s) => s.type === 'integer')
+      const morph = isInteger
+        ? numberMorph('isSafeInteger', 'an integer')
+        : numberMorph('isFinite', 'a number')
+      const merged = definitions.every(isQuoted)
+        ? (() => {
+            const parts = definitions
+              .map((d) => d.slice(1, -1))
+              .filter((d) => d !== 'number' && d !== 'number.integer')
+            if (parts.length === 0) return isInteger ? '"number.integer"' : '"number"'
+            return `"${parts.join(' & ')}"`
+          })()
+        : definitions.length === 1
+          ? definitions[0]
+          : intersectionStr(definitions, isArktype)
+      return arktypeWrap(wireNumeric(morph, merged), { ...schema, nullable })
     }
-    const schemas = members.map((s) => arktype(s, rootName, isArktype, options))
+    const schemas = members.map((s) =>
+      isKeywordOnlyMember(s) ? keywordConstraint(s) : arktype(s, rootName, isArktype, options),
+    )
     if (schemas.length === 0) return arktypeWrap('"unknown"', { ...schema, nullable })
     const baseResult = schemas.length === 1 ? schemas[0] : intersectionStr(schemas, isArktype)
     return arktypeWrap(baseResult, { ...schema, nullable })
@@ -276,10 +301,11 @@ function node(
     if (typeof inner !== 'object' || inner === null) return arktypeWrap('"unknown"', schema)
     const notMessage = schema['x-not-message']
     const predicate = ((): string | undefined => {
-      const shared = notPredicate(inner, 'data', 'data: unknown')
+      const bigint = isBigintFormat(withoutNot)
+      const shared = notPredicate(inner, 'data', 'data: unknown', bigint)
       if (shared !== undefined) return shared
       if (Array.isArray(inner.enum)) {
-        return `(data: unknown) => !${JSON.stringify(inner.enum)}.includes(data as never)`
+        return `(data: unknown) => !${valueListLiteral(inner.enum, bigint)}.includes(data as never)`
       }
       return undefined
     })()
@@ -500,6 +526,11 @@ function node(
     return arktypeWrap('"Date"', schema)
   }
   if (types.length === 1 && types[0] === 'null') return arktypeWrap('"null"', schema)
+
+  // An `allOf` member that is only `additionalProperties` still constrains every value.
+  if (typeof schema.additionalProperties === 'object') {
+    return readonly(arktypeWrap(object(schema, rootName, isArktype, options), schema))
+  }
 
   return arktypeWrap('"unknown"', schema)
 }

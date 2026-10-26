@@ -9,7 +9,15 @@ export const Ids = v.pipe(
   }),
   v.unknown(),
   v.transform((input) => (input === undefined || Array.isArray(input) ? input : [input])),
-  v.array(v.pipe(v.string(), v.transform(Number), v.number(), v.safeInteger())),
+  v.array(
+    v.pipe(
+      v.string(),
+      v.regex(/^-?(?:0|[1-9]\d*)$/),
+      v.transform((input) => Number(input)),
+      v.number(),
+      v.safeInteger(),
+    ),
+  ),
   v.minLength(1),
 )
 

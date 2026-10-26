@@ -156,6 +156,19 @@ export const STRINGBOOL_TRUTHY_PATTERN = /^(?:true|1|yes|on|y|enabled)$/i
 /** The text of a 64-bit integer: a sign and digits, which `BigInt` reads losslessly. */
 export const INTEGER_TEXT_PATTERN = /^-?\d+$/
 
+/**
+ * Integer text on the string wire. A sign and digits, with no leading zero, no exponent
+ * and no fraction: `Number` and `parseInt` both accept more than this (`""`, `" "`,
+ * `"0x10"`, `"1e3"`, `"1.9xyz"`).
+ */
+export const INTEGER_WIRE_PATTERN = /^-?(?:0|[1-9]\d*)$/
+
+/**
+ * Number text on the string wire: the JSON number grammar (RFC 8259). An exponent is a
+ * number (`1e3`) and is not an integer. Blank, hex and trailing junk are not numbers.
+ */
+export const NUMBER_WIRE_PATTERN = /^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/
+
 /** The range of each fixed-width numeric format, as the literals the generators emit. */
 export const NUMBER_RANGES: {
   readonly [k: string]: { readonly minimum: string; readonly maximum: string }

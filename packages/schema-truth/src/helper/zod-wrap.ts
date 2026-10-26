@@ -4,7 +4,14 @@ import { coerceDefault } from '../utils/index.js'
 import { readCodeExtension } from './code-extensions.js'
 import type { CodeExtensionOptions } from './code-extensions.js'
 import { serializeJSValue } from './meta.js'
-import { examplesOf } from './schema.js'
+import { examplesOf, schemaWithDefaultTarget } from './schema.js'
+import type { SchemaDefinitions } from './schema.js'
+
+/** The options of {@link zodWrap}. */
+export type ZodWrapOptions = CodeExtensionOptions & {
+  /** Definitions a `default` beside a `$ref` is reconciled against. */
+  readonly definitions?: SchemaDefinitions
+}
 
 /**
  * Wraps a Zod schema string with `.default()`, `.nullable()`, `.brand<...>()`
@@ -18,11 +25,7 @@ import { examplesOf } from './schema.js'
  *
  * @see https://zod.dev/metadata
  */
-export function zodWrap(
-  zodStr: string,
-  schema: JSONSchema,
-  options?: CodeExtensionOptions,
-): string {
+export function zodWrap(zodStr: string, schema: JSONSchema, options?: ZodWrapOptions): string {
   const formatLiteral = (value: unknown): string => {
     if (typeof value === 'boolean') return `${value}`
     if (typeof value === 'number') {
@@ -35,8 +38,9 @@ export function zodWrap(
     }
     return JSON.stringify(value)
   }
+  const described = schemaWithDefaultTarget(schema, options?.definitions)
   const defaultResult =
-    schema.default !== undefined ? coerceDefault(schema, schema.default) : undefined
+    schema.default !== undefined ? coerceDefault(described, schema.default) : undefined
   // `.nullable()` must precede `.default()` so a `default: null` is valid against
   // the nullable type; for non-null defaults the order is behaviourally identical.
   const withNullable = isNullable(schema) ? `${zodStr}.nullable()` : zodStr

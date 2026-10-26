@@ -322,6 +322,10 @@ describe('valibot', () => {
         { not: { enum: ['a', 'b'] } },
         'v.custom<unknown>((input) => !["a","b"].some((item) => item === input))',
       ],
+      [
+        { type: 'integer', format: 'int64', not: { enum: [0] } },
+        'v.pipe(v.union([v.bigint(),v.pipe(v.number(),v.integer()),v.pipe(v.string(),v.regex(/^-?\\d+$/))]),v.transform((input)=>BigInt(input)),v.minValue(-9223372036854775808n),v.maxValue(9223372036854775807n),v.check((input) => ![0n].some((item) => item === input)))',
+      ],
     ])('valibot(%o) → %s', (input, expected) => {
       expect(valibot(input)).toBe(expected)
     })
@@ -1110,13 +1114,13 @@ describe('valibot', () => {
   describe('paramIn coercion', () => {
     it('query: integer → string transform', () => {
       expect(valibot({ type: 'integer' }, 'Schema', false, { paramIn: 'query' })).toBe(
-        'v.pipe(v.string(),v.transform(Number),v.number(),v.safeInteger())',
+        'v.pipe(v.string(),v.regex(/^-?(?:0|[1-9]\\d*)$/),v.transform((input)=>Number(input)),v.number(),v.safeInteger())',
       )
     })
 
     it('query: number → string transform', () => {
       expect(valibot({ type: 'number' }, 'Schema', false, { paramIn: 'query' })).toBe(
-        'v.pipe(v.string(),v.transform(Number),v.number(),v.finite())',
+        'v.pipe(v.string(),v.regex(/^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$/),v.transform((input)=>Number(input)),v.number(),v.finite())',
       )
     })
 
@@ -1140,13 +1144,13 @@ describe('valibot', () => {
       expect(
         valibot({ type: 'integer', default: 1, minimum: 1 }, 'Schema', false, { paramIn: 'query' }),
       ).toBe(
-        'v.optional(v.pipe(v.string(),v.transform(Number),v.number(),v.safeInteger(),v.minValue(1)),"1")',
+        'v.optional(v.pipe(v.string(),v.regex(/^-?(?:0|[1-9]\\d*)$/),v.transform((input)=>Number(input)),v.number(),v.safeInteger(),v.minValue(1)),"1")',
       )
     })
 
     it('query: number with default → default emitted as string-wire literal', () => {
       expect(valibot({ type: 'number', default: 2.5 }, 'Schema', false, { paramIn: 'query' })).toBe(
-        'v.optional(v.pipe(v.string(),v.transform(Number),v.number(),v.finite()),"2.5")',
+        'v.optional(v.pipe(v.string(),v.regex(/^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$/),v.transform((input)=>Number(input)),v.number(),v.finite()),"2.5")',
       )
     })
 
@@ -1314,12 +1318,12 @@ describe('valibot contains / minContains / maxContains', () => {
       [
         { type: 'array', items: { type: 'integer' } },
         { paramIn: 'query' },
-        'v.pipe(v.unknown(),v.transform((input)=>(input===undefined||Array.isArray(input)?input:[input])),v.array(v.pipe(v.string(),v.transform(Number),v.number(),v.safeInteger())))',
+        'v.pipe(v.unknown(),v.transform((input)=>(input===undefined||Array.isArray(input)?input:[input])),v.array(v.pipe(v.string(),v.regex(/^-?(?:0|[1-9]\\d*)$/),v.transform((input)=>Number(input)),v.number(),v.safeInteger())))',
       ],
       [
         { type: 'integer', enum: [1, 2] },
         { paramIn: 'query' },
-        'v.pipe(v.string(),v.transform(Number),v.union([v.literal(1),v.literal(2)]))',
+        'v.pipe(v.string(),v.regex(/^-?(?:0|[1-9]\\d*)$/),v.transform((input)=>Number(input)),v.union([v.literal(1),v.literal(2)]))',
       ],
       [
         { type: 'boolean', const: true },
@@ -1329,28 +1333,28 @@ describe('valibot contains / minContains / maxContains', () => {
       [
         { type: 'integer', nullable: true },
         { paramIn: 'query' },
-        "v.pipe(v.unknown(),v.transform((input)=>(input==='null'?null:input)),v.nullable(v.pipe(v.string(),v.transform(Number),v.number(),v.safeInteger())))",
+        "v.pipe(v.unknown(),v.transform((input)=>(input==='null'?null:input)),v.nullable(v.pipe(v.string(),v.regex(/^-?(?:0|[1-9]\\d*)$/),v.transform((input)=>Number(input)),v.number(),v.safeInteger())))",
       ],
       [
         { oneOf: [{ type: 'integer' }, { type: 'null' }] },
         { paramIn: 'query' },
-        "v.pipe(v.unknown(),v.transform((input)=>(input==='null'?null:input)),v.nullable(v.union([v.pipe(v.string(),v.transform(Number),v.number(),v.safeInteger()),v.pipe(v.unknown(),v.transform((input)=>(input==='null'?null:input)),v.nullable(v.null()))])))",
+        "v.pipe(v.unknown(),v.transform((input)=>(input==='null'?null:input)),v.nullable(v.union([v.pipe(v.string(),v.regex(/^-?(?:0|[1-9]\\d*)$/),v.transform((input)=>Number(input)),v.number(),v.safeInteger()),v.pipe(v.unknown(),v.transform((input)=>(input==='null'?null:input)),v.nullable(v.null()))])))",
       ],
       [
         { minimum: 1 },
         { paramIn: 'query' },
-        'v.pipe(v.string(),v.transform(Number),v.number(),v.finite(),v.minValue(1))',
+        'v.pipe(v.string(),v.regex(/^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$/),v.transform((input)=>Number(input)),v.number(),v.finite(),v.minValue(1))',
       ],
       [{ maxLength: 3 }, { paramIn: 'query' }, 'v.pipe(v.string(),v.maxCodePoints(3))'],
       [
         { type: 'integer', not: { const: 0 } },
         { paramIn: 'query' },
-        'v.pipe(v.string(),v.transform(Number),v.number(),v.safeInteger(),v.check((input) => input !== 0))',
+        'v.pipe(v.string(),v.regex(/^-?(?:0|[1-9]\\d*)$/),v.transform((input)=>Number(input)),v.number(),v.safeInteger(),v.check((input) => input !== 0))',
       ],
       [
         { type: ['integer', 'string'] },
         { paramIn: 'query' },
-        'v.union([v.pipe(v.string(),v.transform(Number),v.number(),v.safeInteger()),v.string()])',
+        'v.union([v.pipe(v.string(),v.regex(/^-?(?:0|[1-9]\\d*)$/),v.transform((input)=>Number(input)),v.number(),v.safeInteger()),v.string()])',
       ],
       [{ type: ['string', 'number'] }, undefined, 'v.union([v.string(),v.number()])'],
       [
@@ -1429,12 +1433,12 @@ describe('valibot contains / minContains / maxContains', () => {
         // A `constructor` key in an object literal is checked against Object's own member.
         { type: 'object', properties: Object.fromEntries([['constructor', { type: 'integer' }]]) },
         { paramIn: 'query' },
-        'v.pipe(v.unknown(),v.transform((input)=>(typeof input==="object"&&input!==null&&!Array.isArray(input)?Object.assign(Object.create(null),input):input)),v.partial(v.object({constructor:v.pipe(v.string(),v.transform(Number),v.number(),v.safeInteger())})))',
+        'v.pipe(v.unknown(),v.transform((input)=>(typeof input==="object"&&input!==null&&!Array.isArray(input)?Object.assign(Object.create(null),input):input)),v.partial(v.object({constructor:v.pipe(v.string(),v.regex(/^-?(?:0|[1-9]\\d*)$/),v.transform((input)=>Number(input)),v.number(),v.safeInteger())})))',
       ],
       [
         { type: 'object', properties: { int_def: { type: 'integer', default: 20 } } },
         { paramIn: 'query' },
-        'v.object({int_def:v.optional(v.pipe(v.string(),v.transform(Number),v.number(),v.safeInteger()),"20")})',
+        'v.object({int_def:v.optional(v.pipe(v.string(),v.regex(/^-?(?:0|[1-9]\\d*)$/),v.transform((input)=>Number(input)),v.number(),v.safeInteger()),"20")})',
       ],
       [
         {
@@ -1447,7 +1451,7 @@ describe('valibot contains / minContains / maxContains', () => {
       [
         { type: 'number' },
         { paramIn: 'query' },
-        'v.pipe(v.string(),v.transform(Number),v.number(),v.finite())',
+        'v.pipe(v.string(),v.regex(/^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$/),v.transform((input)=>Number(input)),v.number(),v.finite())',
       ],
       [
         { type: 'number', format: 'float32' },
@@ -1457,7 +1461,7 @@ describe('valibot contains / minContains / maxContains', () => {
       [
         { type: 'integer' },
         { paramIn: 'query' },
-        'v.pipe(v.string(),v.transform(Number),v.number(),v.safeInteger())',
+        'v.pipe(v.string(),v.regex(/^-?(?:0|[1-9]\\d*)$/),v.transform((input)=>Number(input)),v.number(),v.safeInteger())',
       ],
       [
         { type: 'integer', format: 'int32' },
@@ -1467,7 +1471,7 @@ describe('valibot contains / minContains / maxContains', () => {
       [
         { type: 'integer', format: 'uint32' },
         { paramIn: 'query' },
-        'v.pipe(v.string(),v.transform(Number),v.number(),v.safeInteger(),v.minValue(0),v.maxValue(4294967295))',
+        'v.pipe(v.string(),v.regex(/^-?(?:0|[1-9]\\d*)$/),v.transform((input)=>Number(input)),v.number(),v.safeInteger(),v.minValue(0),v.maxValue(4294967295))',
       ],
       [
         { type: 'string', format: 'date' },
@@ -1497,12 +1501,12 @@ describe('valibot contains / minContains / maxContains', () => {
       [
         { type: 'array', items: { type: 'integer' } },
         { paramIn: 'query', explode: false },
-        "v.pipe(v.unknown(),v.transform((input)=>{if(typeof input!=='string')return input;const text=input;return (text===''?[]:text.split(\",\"))}),v.unknown(),v.transform((input)=>(input===undefined||Array.isArray(input)?input:[input])),v.array(v.pipe(v.string(),v.transform(Number),v.number(),v.safeInteger())))",
+        "v.pipe(v.unknown(),v.transform((input)=>{if(typeof input!=='string')return input;const text=input;return (text===''?[]:text.split(\",\"))}),v.unknown(),v.transform((input)=>(input===undefined||Array.isArray(input)?input:[input])),v.array(v.pipe(v.string(),v.regex(/^-?(?:0|[1-9]\\d*)$/),v.transform((input)=>Number(input)),v.number(),v.safeInteger())))",
       ],
       [
         { type: 'object', properties: { age: { type: 'integer' } } },
         { paramIn: 'query', style: 'deepObject' },
-        "v.pipe(v.unknown(),v.transform((input)=>{if(typeof input!=='object'||input===null||Array.isArray(input))return input;const out=Object.entries(input).reduce<{[k:string]:unknown}>((acc,[key,value])=>{const name=/^[^[\\]]+\\[([^\\]]+)\\]$/u.exec(key)?.[1];return name===undefined?acc:{...acc,[name]:value}},{});return Object.keys(out).length>0?out:input}),v.partial(v.object({age:v.pipe(v.string(),v.transform(Number),v.number(),v.safeInteger())})))",
+        "v.pipe(v.unknown(),v.transform((input)=>{if(typeof input!=='object'||input===null||Array.isArray(input))return input;const out=Object.entries(input).reduce<{[k:string]:unknown}>((acc,[key,value])=>{const name=/^[^[\\]]+\\[([^\\]]+)\\]$/u.exec(key)?.[1];return name===undefined?acc:{...acc,[name]:value}},{});return Object.keys(out).length>0?out:input}),v.partial(v.object({age:v.pipe(v.string(),v.regex(/^-?(?:0|[1-9]\\d*)$/),v.transform((input)=>Number(input)),v.number(),v.safeInteger())})))",
       ],
       [
         { type: 'object', properties: { id: { type: 'integer' } } },
@@ -1555,5 +1559,27 @@ describe('valibot contains / minContains / maxContains', () => {
     ])('valibot(%o, %o) → %s', (schema, options, expected) => {
       expect(valibot(schema, 'Schema', false, options)).toBe(expected)
     })
+  })
+})
+
+describe('allOf keyword members', () => {
+  it.concurrent.each<[JSONSchema, EmitOptions | undefined, string]>([
+    [
+      { allOf: [{ type: 'integer' }, { minimum: 5 }] },
+      undefined,
+      'v.pipe(v.number(),v.integer(),v.minValue(5))',
+    ],
+    [
+      { allOf: [{ minimum: 5 }] },
+      undefined,
+      "v.pipe(v.any(),v.check((input) => (typeof input !== 'number' || (input >= 5))))",
+    ],
+    [
+      { allOf: [{ type: 'integer' }, { minimum: 5 }] },
+      { paramIn: 'query' },
+      'v.pipe(v.string(),v.regex(/^-?(?:0|[1-9]\\d*)$/),v.transform((input)=>Number(input)),v.number(),v.safeInteger(),v.minValue(5))',
+    ],
+  ])('valibot(%o, %o) → %s', (schema, options, expected) => {
+    expect(valibot(schema, 'Schema', false, options)).toBe(expected)
   })
 })

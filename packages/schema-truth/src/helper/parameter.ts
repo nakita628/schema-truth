@@ -43,6 +43,39 @@ export function withoutParameterSerialization(options: EmitOptions | undefined):
       unsafeCodeExtensions: options.unsafeCodeExtensions,
     }),
     ...(options?.paramIn !== undefined && !isJson && { paramIn: options.paramIn }),
+    ...(options?.definitions !== undefined && { definitions: options.definitions }),
+    ...(options?.properties !== undefined && { properties: options.properties }),
+  }
+}
+
+/**
+ * The emit options of one property, when that property carries its own serialization
+ * (`x-style` / `x-explode` / `x-allowEmptyValue`, or `options.properties`). `undefined`
+ * when it does not, so the caller keeps the object's options. Requires `paramIn`: the
+ * keywords describe wire text.
+ */
+export function propertyEmitOptions(
+  key: string,
+  property: JSONSchema,
+  options: EmitOptions | undefined,
+): EmitOptions | undefined {
+  if (options?.paramIn === undefined) return undefined
+  const named = options.properties?.[key]
+  const style = named?.style ?? property['x-style']
+  const explode = named?.explode ?? property['x-explode']
+  const allowEmptyValue = named?.allowEmptyValue === true || property['x-allowEmptyValue'] === true
+  if (style === undefined && explode === undefined && !allowEmptyValue) return undefined
+  return {
+    ...(options.openapi !== undefined && { openapi: options.openapi }),
+    ...(options.readonly !== undefined && { readonly: options.readonly }),
+    ...(options.unsafeCodeExtensions !== undefined && {
+      unsafeCodeExtensions: options.unsafeCodeExtensions,
+    }),
+    ...(options.definitions !== undefined && { definitions: options.definitions }),
+    paramIn: options.paramIn,
+    ...(style !== undefined && { style }),
+    ...(explode !== undefined && { explode }),
+    ...(allowEmptyValue && { allowEmptyValue: true }),
   }
 }
 

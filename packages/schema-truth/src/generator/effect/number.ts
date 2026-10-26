@@ -1,4 +1,5 @@
 import { NUMBER_RANGES } from '../../constants/index.js'
+import { integerWirePattern, numberWirePattern } from '../../helper/index.js'
 import type { JSONSchema } from '../../parser/index.js'
 import { effectError, effectErrorPart } from '../../utils/index.js'
 
@@ -59,15 +60,24 @@ export function rangeCheck(format: string | undefined, suffix = ''): readonly st
 }
 
 /**
- * The Effect schema of a number node. On the string wire the text is read with
- * `Schema.FiniteFromString`, which refuses `NaN` and the infinities as `z.coerce.number()`
- * does; `float` / `float32` carries its range.
+ * Wire text checked against the integer or JSON number grammar, then decoded to a finite
+ * number. `Schema.FiniteFromString` uses `Number`, which accepts `""`, `" "` and `"0x10"`.
+ */
+export function wireNumericInput(kind: 'integer' | 'number'): string {
+  const pattern = kind === 'integer' ? integerWirePattern() : numberWirePattern()
+  return `Schema.String.check(Schema.isPattern(${pattern})).pipe(Schema.decodeTo(Schema.Finite,SchemaTransformation.transform({decode:(input)=>Number(input),encode:(output)=>String(output)})))`
+}
+
+/**
+ * The Effect schema of a number node. On the string wire the text has to match the JSON
+ * number grammar before it is decoded to a finite number; `float` / `float32` carries
+ * its range.
  */
 export function number(schema: JSONSchema, options?: { readonly wire?: boolean }) {
   const errorMessage = schema['x-error-message'] ?? schema['x-required-message']
   const isFloat32 = schema.format === 'float' || schema.format === 'float32'
   const checks = [...rangeCheck(isFloat32 ? 'float32' : undefined), ...numberChecks(schema)]
-  const input = options?.wire === true ? 'Schema.FiniteFromString' : 'Schema.Number'
+  const input = options?.wire === true ? wireNumericInput('number') : 'Schema.Number'
   const base = checks.length > 0 ? `${input}.check(${checks.join(',')})` : input
   return errorMessage ? `${base}.annotate(${effectError(errorMessage)})` : base
 }

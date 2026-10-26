@@ -1,5 +1,6 @@
 import type { JSONSchema } from '../../parser/index.js'
 import { zodBaseError, zodError, zodErrorPart } from '../../utils/index.js'
+import { zodWireNumber } from './number.js'
 
 /** Whether a node is a 64-bit integer: a value beyond 2^53 that Zod reads as a bigint. */
 export function isInt64(schema: JSONSchema): boolean {
@@ -22,17 +23,19 @@ export function int64Input(isWire: boolean, baseErrorArg = ''): string {
  * min/max/multipleOf constraints and `x-*-message` vendor extensions translated
  * to Zod v4 `{error: "msg"}` parameters.
  */
-export function integer(schema: JSONSchema) {
+export function integer(schema: JSONSchema, options?: { readonly wire?: boolean }) {
+  const isWire = options?.wire === true
   const errorMessage = schema['x-error-message']
   const requiredMessage = schema['x-required-message']
-  const isCoerce = schema['x-coerce'] === true
-  // coerce converts undefined → NaN/BigInt error before the error handler runs,
+  const isCoerce = schema['x-coerce'] === true && !isWire
+  const readsText = isCoerce || isWire
+  // Coercion converts undefined → NaN/BigInt error before the error handler runs,
   // so issue.input === undefined is unreachable — drop x-required-message.
-  const baseErrorArg = zodBaseError(errorMessage, isCoerce ? undefined : requiredMessage)
+  const baseErrorArg = zodBaseError(errorMessage, readsText ? undefined : requiredMessage)
   const isBigint = schema.format === 'bigint'
   const isInt32 = schema.format === 'int32' || schema.format === 'uint32'
   const is64 = isInt64(schema)
-  const bigintBase = isCoerce && isBigint
+  const bigintBase = readsText && isBigint
   const numberPipe = isCoerce && isInt32
   const numberChain = isCoerce && !isBigint && !is64 && !isInt32
   const base = bigintBase
@@ -111,13 +114,20 @@ export function integer(schema: JSONSchema) {
     typeof schema.multipleOf === 'number'
       ? `.multipleOf(${lit(schema.multipleOf)}${multipleOfErrorArg})`
       : undefined
+  const constraints = [minimum, maximum, multipleOf].filter((v) => v !== undefined).join('')
   const innerChain = [base, minimum, maximum, multipleOf].filter((v) => v !== undefined).join('')
+  if (isWire && !isBigint && !is64) {
+    const intErrorArg = errorMessage ? zodError(errorMessage) : ''
+    const inner = isInt32
+      ? innerChain
+      : `z.number(${baseErrorArg}).int(${intErrorArg})${constraints}`
+    return `${zodWireNumber('integer', baseErrorArg)}.pipe(${inner})`
+  }
   if (numberChain) {
-    const constraints = [minimum, maximum, multipleOf].filter((v) => v !== undefined).join('')
     const intErrorArg = errorMessage ? zodError(errorMessage) : ''
     return `z.coerce.number(${baseErrorArg}).int(${intErrorArg})${constraints}`
   }
   if (numberPipe) return `z.coerce.number(${baseErrorArg}).pipe(${innerChain})`
-  if (is64) return `${int64Input(isCoerce, baseErrorArg)}.pipe(${innerChain})`
+  if (is64) return `${int64Input(readsText, baseErrorArg)}.pipe(${innerChain})`
   return innerChain
 }

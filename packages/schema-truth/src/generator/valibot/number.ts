@@ -1,4 +1,5 @@
 import { NUMBER_RANGES } from '../../constants/index.js'
+import { numberWirePattern } from '../../helper/index.js'
 import type { JSONSchema } from '../../parser/index.js'
 import { valibotError, valibotErrorPart } from '../../utils/index.js'
 
@@ -55,8 +56,9 @@ export function rangeActions(format: string | undefined): readonly string[] {
 }
 
 /**
- * The Valibot schema of a number node. On the string wire the text is read with `Number`
- * and checked finite, as `z.coerce.number()` is; `float` / `float32` carries its range.
+ * The Valibot schema of a number node. On the string wire the text has to match the JSON
+ * number grammar before `Number` reads it, then it is checked finite; `float` / `float32`
+ * carries its range.
  */
 export function number(schema: JSONSchema, options?: { readonly wire?: boolean }) {
   const errorMessage = schema['x-error-message']
@@ -74,7 +76,8 @@ export function number(schema: JSONSchema, options?: { readonly wire?: boolean }
   ]
   const base = `v.number(${baseErrorArg})`
   if (options?.wire === true) {
-    return `v.pipe(v.string(),v.transform(Number),${base},${actions.join(',')})`
+    const regexError = baseErrorArg === '' ? '' : `,${baseErrorArg}`
+    return `v.pipe(v.string(),v.regex(${numberWirePattern()}${regexError}),v.transform((input)=>Number(input)),${base},${actions.join(',')})`
   }
   if (actions.length > 0) return `v.pipe(${base},${actions.join(',')})`
   return errorMessage ? base : 'v.number()'

@@ -1,5 +1,6 @@
 import { hasFixedLength } from '../../guard/index.js'
 import { typeboxDefaultOpt, typeboxMetaOpts, typeboxRefOpt } from '../../helper/meta.js'
+import { patternSource } from '../../helper/regex.js'
 import type { JSONSchema } from '../../parser/index.js'
 
 const FORMAT_MAP: { readonly [k: string]: string } = {
@@ -71,7 +72,7 @@ export function string(schema: JSONSchema, ref?: string) {
       ? `format:${JSON.stringify(FORMAT_MAP[schema.format])}`
       : undefined,
     schema.pattern
-      ? `pattern:${JSON.stringify(schema.pattern)}`
+      ? `pattern:${JSON.stringify(patternSource(schema.pattern))}`
       : contentPattern
         ? `pattern:${JSON.stringify(contentPattern)}`
         : undefined,

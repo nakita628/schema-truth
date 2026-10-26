@@ -22,7 +22,19 @@ export const Ids = Schema.Unknown.pipe(
         }),
       ),
       Schema.decodeTo(
-        Schema.Array(Schema.FiniteFromString.check(Schema.isInt())).check(Schema.isMinLength(1)),
+        Schema.Array(
+          Schema.String.check(Schema.isPattern(/^-?(?:0|[1-9]\d*)$/))
+            .pipe(
+              Schema.decodeTo(
+                Schema.Finite,
+                SchemaTransformation.transform({
+                  decode: (input) => Number(input),
+                  encode: (output) => String(output),
+                }),
+              ),
+            )
+            .check(Schema.isInt()),
+        ).check(Schema.isMinLength(1)),
       ),
     ),
   ),

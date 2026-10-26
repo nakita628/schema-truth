@@ -8,7 +8,15 @@ export const Ids = z.preprocess(
   },
   z.preprocess(
     (val) => (val === undefined || Array.isArray(val) ? val : [val]),
-    z.array(z.coerce.number().int()).min(1),
+    z
+      .array(
+        z
+          .string()
+          .regex(/^-?(?:0|[1-9]\d*)$/)
+          .transform((val) => Number(val))
+          .pipe(z.number().int()),
+      )
+      .min(1),
   ),
 )
 

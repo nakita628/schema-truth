@@ -11,7 +11,13 @@ export const Filter = v.pipe(
     return Object.keys(out).length > 0 ? out : input
   }),
   v.object({
-    age: v.pipe(v.string(), v.transform(Number), v.number(), v.safeInteger()),
+    age: v.pipe(
+      v.string(),
+      v.regex(/^-?(?:0|[1-9]\d*)$/),
+      v.transform((input) => Number(input)),
+      v.number(),
+      v.safeInteger(),
+    ),
     name: v.optional(v.string()),
   }),
 )

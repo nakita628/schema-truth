@@ -2,7 +2,7 @@ import { INTEGER_TEXT_PATTERN, NUMBER_RANGES } from '../../constants/index.js'
 import { regexSource } from '../../helper/format.js'
 import type { JSONSchema } from '../../parser/index.js'
 import { effectError } from '../../utils/index.js'
-import { numberChecks } from './number.js'
+import { numberChecks, wireNumericInput } from './number.js'
 
 /** Whether a node is a 64-bit integer: a value beyond 2^53 that is read as a bigint. */
 export function isInt64(schema: JSONSchema): boolean {
@@ -30,7 +30,7 @@ function int64Range(format: string): string {
 /**
  * The Effect schema of an integer node. `int64` / `uint64` are bigints wherever they come
  * from, `bigint` is one too, `int32` / `uint32` are their own filters, and on the string
- * wire the text is read with `Schema.FiniteFromString`.
+ * wire the text has to match the integer grammar before it is decoded to a finite number.
  */
 export function integer(schema: JSONSchema, options?: { readonly wire?: boolean }) {
   const isWire = options?.wire === true
@@ -58,6 +58,6 @@ export function integer(schema: JSONSchema, options?: { readonly wire?: boolean 
         ? `Schema.isInt(${effectError(errorMessage)})`
         : 'Schema.isInt()'
   const checks = [intCheck, ...numberChecks(schema)]
-  const input = isWire ? 'Schema.FiniteFromString' : 'Schema.Number'
+  const input = isWire ? wireNumericInput('integer') : 'Schema.Number'
   return `${input}.check(${checks.join(',')})`
 }

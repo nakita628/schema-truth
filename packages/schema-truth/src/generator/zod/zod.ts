@@ -9,16 +9,23 @@ import {
   isStringWireLocation,
 } from '../../guard/index.js'
 import {
+  constraintMessage,
+  constraintPredicate,
+  foldAllOfMembers,
   impliedWireType,
+  isKeywordOnlyMember,
   isNullMatchedFirst,
   isNullTextRead,
   isPrimitiveUnion,
   itemsSchemaOf,
+  isBigintFormat,
   notPredicate,
+  valueListLiteral,
   refTarget,
   unionPrimitiveTypes,
   wireArrayOnce,
   wireNullText,
+  wireNumericKind,
   zodWrap as _zodWrap,
 } from '../../helper/index.js'
 import type { CodeExtensionOptions } from '../../helper/index.js'
@@ -32,7 +39,7 @@ import {
 } from '../../utils/index.js'
 import { _enum } from './enum.js'
 import { int64Input, integer, isInt64 } from './integer.js'
-import { number } from './number.js'
+import { number, zodWireNumber } from './number.js'
 import { object } from './object.js'
 import { parameter, hasParameterSerialization, withoutParameterSerialization } from './parameter.js'
 import { string } from './string.js'
@@ -59,11 +66,14 @@ const ZOD_ISSUE_CODES = [
  * The `not` predicate of an inner schema, as the source of a `(val) => ...` arrow, or
  * `undefined` when the inner schema has none this generator can express.
  */
-function zodNotPredicate(inner: JSONSchema): string | undefined {
+function zodNotPredicate(inner: JSONSchema, parent: JSONSchema): string | undefined {
   if (inner.$ref) return undefined
-  const shared = notPredicate(inner, 'val')
+  const bigint = isBigintFormat(parent)
+  const shared = notPredicate(inner, 'val', 'val', bigint)
   if (shared !== undefined) return shared
-  if (Array.isArray(inner.enum)) return `(val) => !${JSON.stringify(inner.enum)}.includes(val)`
+  if (Array.isArray(inner.enum)) {
+    return `(val) => !${valueListLiteral(inner.enum, bigint)}.includes(val)`
+  }
   if (inner.oneOf || inner.anyOf || inner.allOf) {
     return `(val) => !${zod(inner)}.safeParse(val).success`
   }
@@ -101,6 +111,12 @@ export function zod(
   return `z.preprocess(${wireNullText('val')},${nullFirst})`
 }
 
+/** A keyword-only `allOf` member: the keywords apply when the value has their type. */
+function keywordConstraint(schema: JSONSchema): string {
+  const body = constraintPredicate(schema, 'val')
+  return `z.any().refine((val) => ${body}${zodErrorPart(constraintMessage(schema))})`
+}
+
 function node(
   schema: JSONSchema,
   rootName: string,
@@ -109,11 +125,13 @@ function node(
 ): string {
   const isStringWireParam = isStringWireLocation(options?.paramIn)
   const isWireCoerced = isStringWireParam && schema['x-coerce'] !== false
-  const withForcedCoerce = (s: JSONSchema): JSONSchema =>
-    isStringWireParam && s['x-coerce'] !== false ? { ...s, 'x-coerce': true } : s
   const codeExtOpts: CodeExtensionOptions =
     options?.unsafeCodeExtensions === true ? { unsafeCodeExtensions: true } : {}
-  const zodWrap = (zodStr: string, s: JSONSchema): string => _zodWrap(zodStr, s, codeExtOpts)
+  const zodWrap = (zodStr: string, s: JSONSchema): string =>
+    _zodWrap(zodStr, s, {
+      ...codeExtOpts,
+      ...(options?.definitions !== undefined && { definitions: options.definitions }),
+    })
   const readonly = (v: string) => (options?.readonly ? `${v}.readonly()` : v)
   const wireArray = (v: string) =>
     isStringWireParam ? `z.preprocess(${wireArrayOnce('val')},${v})` : v
@@ -122,7 +140,7 @@ function node(
   const literalInput = (values: readonly unknown[]): string | undefined => {
     if (values.every((v) => typeof v === 'number')) {
       if (isInt64(schema)) return int64Input(isWireCoerced)
-      if (isWireCoerced) return 'z.coerce.number()'
+      if (isWireCoerced) return zodWireNumber(wireNumericKind(schema, values))
     }
     if (isWireCoerced && values.every((v) => typeof v === 'boolean')) return 'z.stringbool()'
     return undefined
@@ -184,9 +202,10 @@ function node(
     if (schema.allOf.length === 0) return zodWrap('z.any()', schema)
     const nullable = isNullable(schema) || schema.allOf.some(isNullTypeMember)
     const defaultValue = schema.allOf.find(isDefaultOnlyMember)?.default
-    const schemas = schema.allOf
-      .filter((s) => !isShapelessMember(s))
-      .map((s) => zod(s, rootName, isZod, options))
+    const schemas = foldAllOfMembers(
+      schema.allOf.filter((s) => !isShapelessMember(s)),
+      isWireCoerced,
+    ).map((s) => (isKeywordOnlyMember(s) ? keywordConstraint(s) : zod(s, rootName, isZod, options)))
     if (schemas.length === 0) return zodWrap('z.any()', { ...schema, nullable })
     const intersected =
       schemas.length === 1 ? schemas[0] : schemas.reduce((acc, s) => `z.intersection(${acc},${s})`)
@@ -219,7 +238,7 @@ function node(
     if (typeof inner !== 'object' || inner === null) return zodWrap('z.any()', schema)
     const predicate = inner.$ref
       ? `(val) => !${ref(inner, '', false)}.safeParse(val).success`
-      : zodNotPredicate(inner)
+      : zodNotPredicate(inner, withoutNot)
     // A `type` beside `not` still holds: the predicate narrows that type, not any value.
     if (withoutNot.type !== undefined) {
       const base = zod(withoutNot, rootName, isZod, options)
@@ -257,8 +276,8 @@ function node(
   const types = normalizeTypes(schema.type)
   const primitive = (t: string): string | undefined => {
     if (t === 'string') return string(schema)
-    if (t === 'number') return number(withForcedCoerce(schema))
-    if (t === 'integer') return integer(withForcedCoerce(schema))
+    if (t === 'number') return number(schema, { wire: isWireCoerced })
+    if (t === 'integer') return integer(schema, { wire: isWireCoerced })
     if (t !== 'boolean') return undefined
     const errorMessage = schema['x-error-message']
     const errorArg = errorMessage ? zodError(errorMessage) : ''
@@ -384,6 +403,11 @@ function node(
     const errorMessage = schema['x-error-message']
     const errorArg = errorMessage ? zodError(errorMessage) : ''
     return zodWrap(`z.null(${errorArg})`, schema)
+  }
+
+  // An `allOf` member that is only `additionalProperties` still constrains every value.
+  if (typeof schema.additionalProperties === 'object') {
+    return readonly(zodWrap(object(schema, rootName, isZod, options), schema))
   }
 
   return zodWrap('z.any()', schema)

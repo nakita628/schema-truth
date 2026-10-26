@@ -94,6 +94,10 @@ export function normalizeTypes(t?: string | readonly string[]) {
  *   (the caller omits `.default`).
  * - a string `'true'`/`'false'` on a boolean schema denotes the boolean it
  *   spells → coerced to the boolean value (covers `z.stringbool()` query coercion).
+ * - an object default drops keys the schema does not declare, when the emitted
+ *   object has no index signature (`additionalProperties` is not `true` or a
+ *   schema, and there are no `patternProperties`). A loose or record schema
+ *   keeps every key.
  * - everything else is returned unchanged (byte-for-byte identical output).
  *
  * The mismatch check is deliberately shallow and only crosses the
@@ -112,7 +116,14 @@ export function normalizeTypes(t?: string | readonly string[]) {
  * ```
  */
 export function coerceDefault(
-  schema: { readonly type?: string | readonly string[]; readonly nullable?: boolean },
+  schema: {
+    readonly type?: string | readonly string[]
+    readonly nullable?: boolean
+    readonly properties?: { readonly [key: string]: unknown }
+    readonly additionalProperties?: boolean | object
+    readonly patternProperties?: object
+    readonly unevaluatedProperties?: boolean | object
+  },
   value: unknown,
 ): { readonly keep: boolean; readonly value: unknown } {
   const types = Array.isArray(schema.type)
@@ -137,7 +148,36 @@ export function coerceDefault(
   const allowsScalar =
     types.length === 0 || types.some((t) => t !== 'array' && t !== 'object' && t !== 'null')
   if (!isComposite && value !== null && !allowsScalar) return { keep: false, value }
+  if (
+    isDeclaredObject(value) &&
+    schema.properties !== undefined &&
+    !canHoldUndeclaredKeys(schema)
+  ) {
+    const declared = schema.properties
+    const kept: { [key: string]: unknown } = {}
+    for (const [key, item] of Object.entries(value)) {
+      if (Object.hasOwn(declared, key)) kept[key] = item
+    }
+    return { keep: true, value: kept }
+  }
   return { keep: true, value }
+}
+
+function isDeclaredObject(value: unknown): value is { readonly [key: string]: unknown } {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/** Whether a generated object type accepts keys the schema does not name. */
+function canHoldUndeclaredKeys(schema: {
+  readonly additionalProperties?: boolean | object
+  readonly patternProperties?: object
+  readonly unevaluatedProperties?: boolean | object
+}): boolean {
+  if (schema.additionalProperties === true || typeof schema.additionalProperties === 'object') {
+    return true
+  }
+  if (schema.patternProperties !== undefined) return true
+  return schema.unevaluatedProperties === true || typeof schema.unevaluatedProperties === 'object'
 }
 
 /**

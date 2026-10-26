@@ -329,6 +329,14 @@ describe('zod', () => {
         [{ type: 'integer', not: { format: 'int32' } }, 'z.int()'],
         [{ not: { const: 42 } }, 'z.any().refine((val) => val !== 42)'],
         [{ not: { enum: ['a', 'b'] } }, 'z.any().refine((val) => !["a","b"].includes(val))'],
+        [
+          { type: 'integer', format: 'int64', not: { enum: [0] } },
+          String.raw`z.union([z.bigint(),z.number().int(),z.string().regex(/^-?\d+$/)]).transform((val)=>BigInt(val)).pipe(z.int64()).refine((val) => ![0n].includes(val))`,
+        ],
+        [
+          { type: 'integer', format: 'int64', not: { const: 0 } },
+          String.raw`z.union([z.bigint(),z.number().int(),z.string().regex(/^-?\d+$/)]).transform((val)=>BigInt(val)).pipe(z.int64()).refine((val) => val !== 0n)`,
+        ],
       ])('zod(%o) → %s', (input, expected) => {
         expect(zod(input)).toBe(expected)
       })
@@ -1761,13 +1769,13 @@ describe('zod', () => {
   describe('paramIn coercion', () => {
     it('query: integer → z.coerce.number().int()', () => {
       expect(zod({ type: 'integer' }, 'Schema', false, { paramIn: 'query' })).toBe(
-        'z.coerce.number().int()',
+        'z.string().regex(/^-?(?:0|[1-9]\\d*)$/).transform((val)=>Number(val)).pipe(z.number().int())',
       )
     })
 
     it('query: number → z.coerce.number()', () => {
       expect(zod({ type: 'number' }, 'Schema', false, { paramIn: 'query' })).toBe(
-        'z.coerce.number()',
+        'z.string().regex(/^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$/).transform((val)=>Number(val)).pipe(z.number())',
       )
     })
 
@@ -1784,9 +1792,17 @@ describe('zod', () => {
     })
 
     it.concurrent.each<[ParamIn, JSONSchema, string]>([
-      ['header', { type: 'integer' }, 'z.coerce.number().int()'],
+      [
+        'header',
+        { type: 'integer' },
+        'z.string().regex(/^-?(?:0|[1-9]\\d*)$/).transform((val)=>Number(val)).pipe(z.number().int())',
+      ],
       ['cookie', { type: 'boolean' }, 'z.stringbool()'],
-      ['formData', { type: 'number' }, 'z.coerce.number()'],
+      [
+        'formData',
+        { type: 'number' },
+        'z.string().regex(/^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$/).transform((val)=>Number(val)).pipe(z.number())',
+      ],
     ])('%s: %o is coerced from text', (paramIn, schema, expected) => {
       expect(zod(schema, 'Schema', false, { paramIn })).toBe(expected)
     })
@@ -1803,21 +1819,25 @@ describe('zod', () => {
           false,
           { paramIn: 'query' },
         ),
-      ).toBe('z.object({page:z.coerce.number().int(),q:z.string().exactOptional()})')
+      ).toBe(
+        'z.object({page:z.string().regex(/^-?(?:0|[1-9]\\d*)$/).transform((val)=>Number(val)).pipe(z.number().int()),q:z.string().exactOptional()})',
+      )
     })
 
     it('nested in array: items coerced too', () => {
       expect(
         zod({ type: 'array', items: { type: 'integer' } }, 'Schema', false, { paramIn: 'query' }),
       ).toBe(
-        'z.preprocess((val)=>(val===undefined||Array.isArray(val)?val:[val]),z.array(z.coerce.number().int()))',
+        'z.preprocess((val)=>(val===undefined||Array.isArray(val)?val:[val]),z.array(z.string().regex(/^-?(?:0|[1-9]\\d*)$/).transform((val)=>Number(val)).pipe(z.number().int())))',
       )
     })
 
     it('integer with min/max: constraints preserved after coerce', () => {
       expect(
         zod({ type: 'integer', minimum: 1, maximum: 100 }, 'Schema', false, { paramIn: 'query' }),
-      ).toBe('z.coerce.number().int().min(1).max(100)')
+      ).toBe(
+        'z.string().regex(/^-?(?:0|[1-9]\\d*)$/).transform((val)=>Number(val)).pipe(z.number().int().min(1).max(100))',
+      )
     })
 
     it('x-coerce: false overrides paramIn (user opt-out wins)', () => {
@@ -1828,7 +1848,7 @@ describe('zod', () => {
 
     it('paramIn query + format int32 → pipe preserves range constraint', () => {
       expect(zod({ type: 'integer', format: 'int32' }, 'Schema', false, { paramIn: 'query' })).toBe(
-        'z.coerce.number().pipe(z.int32())',
+        'z.string().regex(/^-?(?:0|[1-9]\\d*)$/).transform((val)=>Number(val)).pipe(z.int32())',
       )
     })
 
@@ -1941,19 +1961,22 @@ describe('zod string wire', () => {
     ],
     [
       { type: 'array', prefixItems: [{ type: 'integer' }] },
-      `z.preprocess(${WIRE_ARRAY},z.tuple([z.coerce.number().int()]))`,
+      `z.preprocess(${WIRE_ARRAY},z.tuple([z.string().regex(/^-?(?:0|[1-9]\\d*)$/).transform((val)=>Number(val)).pipe(z.number().int())]))`,
     ],
     // A literal is read through the same coercion as its type.
     [
       { type: 'integer', enum: [1, 2, 3] },
-      'z.coerce.number().pipe(z.union([z.literal(1),z.literal(2),z.literal(3)]))',
+      'z.string().regex(/^-?(?:0|[1-9]\\d*)$/).transform((val)=>Number(val)).pipe(z.union([z.literal(1),z.literal(2),z.literal(3)]))',
     ],
-    [{ type: 'number', const: 1.5 }, 'z.coerce.number().pipe(z.literal(1.5))'],
+    [
+      { type: 'number', const: 1.5 },
+      'z.string().regex(/^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$/).transform((val)=>Number(val)).pipe(z.literal(1.5))',
+    ],
     [{ type: 'boolean', enum: [true] }, 'z.stringbool().pipe(z.literal(true))'],
     [{ type: 'string', enum: ['a', 'b'] }, 'z.enum(["a","b"])'],
     [
       { type: 'integer', enum: [1, 2, null] },
-      `z.preprocess(${WIRE_NULL},z.coerce.number().pipe(z.union([z.literal(1),z.literal(2)])).nullable())`,
+      `z.preprocess(${WIRE_NULL},z.string().regex(/^-?(?:0|[1-9]\\d*)$/).transform((val)=>Number(val)).pipe(z.union([z.literal(1),z.literal(2)])).nullable())`,
     ],
     [
       { type: 'integer', format: 'int64', enum: [1, 2] },
@@ -1963,26 +1986,38 @@ describe('zod string wire', () => {
     // The text `null` is null for a schema that takes null and no string.
     [
       { type: ['integer', 'null'] },
-      `z.preprocess(${WIRE_NULL},z.coerce.number().int().nullable())`,
+      `z.preprocess(${WIRE_NULL},z.string().regex(/^-?(?:0|[1-9]\\d*)$/).transform((val)=>Number(val)).pipe(z.number().int()).nullable())`,
     ],
     [{ type: ['string', 'null'] }, 'z.string().nullable()'],
     [
       { oneOf: [{ type: 'integer' }, { type: 'null' }] },
-      `z.preprocess(${WIRE_NULL},z.union([z.coerce.number().int(),z.preprocess(${WIRE_NULL},z.null().nullable())]).nullable())`,
+      `z.preprocess(${WIRE_NULL},z.union([z.string().regex(/^-?(?:0|[1-9]\\d*)$/).transform((val)=>Number(val)).pipe(z.number().int()),z.preprocess(${WIRE_NULL},z.null().nullable())]).nullable())`,
     ],
     // A typeless constraint implies its type.
-    [{ minimum: 1 }, 'z.coerce.number().min(1)'],
+    [
+      { minimum: 1 },
+      'z.string().regex(/^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$/).transform((val)=>Number(val)).pipe(z.number().min(1))',
+    ],
     [{ maxLength: 3 }, 'z.string().max(3)'],
     [{ minimum: 1, maxLength: 3 }, 'z.any()'],
     // `not` keeps the declared type.
-    [{ type: 'integer', not: { const: 0 } }, 'z.coerce.number().int().refine((val) => val !== 0)'],
+    [
+      { type: 'integer', not: { const: 0 } },
+      'z.string().regex(/^-?(?:0|[1-9]\\d*)$/).transform((val)=>Number(val)).pipe(z.number().int()).refine((val) => val !== 0)',
+    ],
     // Coerced members both read `1`; the first wins.
     [
       { oneOf: [{ type: 'integer' }, { type: 'boolean' }] },
-      'z.union([z.coerce.number().int(),z.stringbool()])',
+      'z.union([z.string().regex(/^-?(?:0|[1-9]\\d*)$/).transform((val)=>Number(val)).pipe(z.number().int()),z.stringbool()])',
     ],
-    [{ type: ['number', 'boolean'] }, 'z.union([z.coerce.number(),z.stringbool()])'],
-    [{ type: ['string', 'integer'] }, 'z.union([z.coerce.number().int(),z.string()])'],
+    [
+      { type: ['number', 'boolean'] },
+      'z.union([z.string().regex(/^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$/).transform((val)=>Number(val)).pipe(z.number()),z.stringbool()])',
+    ],
+    [
+      { type: ['string', 'integer'] },
+      'z.union([z.string().regex(/^-?(?:0|[1-9]\\d*)$/).transform((val)=>Number(val)).pipe(z.number().int()),z.string()])',
+    ],
     // A parameter named like an Object.prototype member is guarded.
     [
       {
@@ -1993,7 +2028,7 @@ describe('zod string wire', () => {
           ['id', { type: 'string' }],
         ]),
       },
-      `z.preprocess(${OWN_PROPERTIES},z.object({constructor:z.coerce.number().int().exactOptional(),id:z.string().exactOptional()}))`,
+      `z.preprocess(${OWN_PROPERTIES},z.object({constructor:z.string().regex(/^-?(?:0|[1-9]\\d*)$/).transform((val)=>Number(val)).pipe(z.number().int()).exactOptional(),id:z.string().exactOptional()}))`,
     ],
     [
       {
@@ -2001,7 +2036,7 @@ describe('zod string wire', () => {
         properties: Object.fromEntries([['valueOf', { type: 'integer' }]]),
         required: ['valueOf'],
       },
-      `z.preprocess(${OWN_PROPERTIES},z.object({valueOf:z.coerce.number().int()}))`,
+      `z.preprocess(${OWN_PROPERTIES},z.object({valueOf:z.string().regex(/^-?(?:0|[1-9]\\d*)$/).transform((val)=>Number(val)).pipe(z.number().int())}))`,
     ],
   ])('zod(%o, query) → %s', (schema, expected) => {
     expect(zod(schema, 'Schema', false, { paramIn: 'query' })).toBe(expected)
@@ -2042,10 +2077,10 @@ describe('zod parameter serialization', () => {
     type: 'object',
     properties: { a: { type: 'integer' }, b: { type: 'string' } },
   }
-  const wireIntegers = `z.preprocess(${WIRE_ARRAY},z.array(z.coerce.number().int()))`
+  const wireIntegers = `z.preprocess(${WIRE_ARRAY},z.array(z.string().regex(/^-?(?:0|[1-9]\\d*)$/).transform((val)=>Number(val)).pipe(z.number().int())))`
   const wireStrings = `z.preprocess(${WIRE_ARRAY},z.array(z.string()))`
   const pairObject =
-    'z.object({a:z.coerce.number().int().exactOptional(),b:z.string().exactOptional()})'
+    'z.object({a:z.string().regex(/^-?(?:0|[1-9]\\d*)$/).transform((val)=>Number(val)).pipe(z.number().int()).exactOptional(),b:z.string().exactOptional()})'
   const split = (separator: string, prefix?: string) =>
     `(val)=>{if(typeof val!=='string')return val;const text=${prefix === undefined ? 'val' : `val.replace(${prefix},'')`};return (text===''?[]:text.split(${JSON.stringify(separator)}))}`
   const pairs = (prefix?: string) =>
@@ -2126,14 +2161,18 @@ describe('zod parameter serialization', () => {
     [
       { type: 'integer' },
       { paramIn: 'path', style: 'matrix' },
-      `z.preprocess((val)=>{if(typeof val!=='string')return val;const text=val.replace(${matrix},'');return text},z.coerce.number().int())`,
+      `z.preprocess((val)=>{if(typeof val!=='string')return val;const text=val.replace(${matrix},'');return text},z.string().regex(/^-?(?:0|[1-9]\\d*)$/).transform((val)=>Number(val)).pipe(z.number().int()))`,
     ],
-    [{ type: 'integer' }, { paramIn: 'path', style: 'simple' }, 'z.coerce.number().int()'],
+    [
+      { type: 'integer' },
+      { paramIn: 'path', style: 'simple' },
+      'z.string().regex(/^-?(?:0|[1-9]\\d*)$/).transform((val)=>Number(val)).pipe(z.number().int())',
+    ],
     // allowEmptyValue and JSON content.
     [
       { type: 'integer', default: 1 },
       { paramIn: 'query', allowEmptyValue: true },
-      `z.preprocess((val)=>(val===''?undefined:val),z.coerce.number().int().default(1))`,
+      `z.preprocess((val)=>(val===''?undefined:val),z.string().regex(/^-?(?:0|[1-9]\\d*)$/).transform((val)=>Number(val)).pipe(z.number().int()).default(1))`,
     ],
     [
       { type: 'object', properties: { a: { type: 'integer' } } },
@@ -2148,10 +2187,35 @@ describe('zod parameter serialization', () => {
     [
       { type: 'integer' },
       { paramIn: 'query', contentType: 'text/plain' },
-      'z.coerce.number().int()',
+      'z.string().regex(/^-?(?:0|[1-9]\\d*)$/).transform((val)=>Number(val)).pipe(z.number().int())',
     ],
   ])('zod(%o, %o) → %s', (schema, options, expected) => {
     expect(zod(schema, 'Schema', false, options)).toBe(expected)
+  })
+
+  it('reads a header array property with its own style', () => {
+    const wire =
+      'z.preprocess((val)=>(val===undefined||Array.isArray(val)?val:[val]),z.array(z.string().regex(/^-?(?:0|[1-9]\\d*)$/).transform((val)=>Number(val)).pipe(z.number().int())))'
+    const reader =
+      "(val)=>{if(typeof val!=='string')return val;const text=val;return (text===''?[]:text.split(\",\"))}"
+    expect(
+      zod(
+        {
+          type: 'object',
+          properties: {
+            'x-ids': {
+              type: 'array',
+              items: { type: 'integer' },
+              'x-style': 'simple',
+              'x-explode': false,
+            },
+          },
+        },
+        'Schema',
+        false,
+        { paramIn: 'header' },
+      ),
+    ).toBe(`z.object({"x-ids":z.preprocess(${reader},${wire}).exactOptional()})`)
   })
 
   describe('#106: a $ref beside a default is wrapped once', () => {
@@ -2170,8 +2234,72 @@ describe('zod parameter serialization', () => {
         'CountSchema.default(3)',
       ],
       [{ type: 'integer', format: 'uint32' }, undefined, 'z.uint32()'],
+      [
+        {
+          $ref: '#/$defs/Filters',
+          default: { fetch_user_data: false, fetch_connection_secrets: false },
+        },
+        {
+          definitions: {
+            Filters: {
+              type: 'object',
+              properties: { fetch_connection_secrets: { type: 'boolean' } },
+            },
+          },
+        },
+        'FiltersSchema.default({"fetch_connection_secrets":false})',
+      ],
     ])('zod(%o, %o) → %s', (schema, options, expected) => {
       expect(zod(schema, 'Schema', false, options)).toBe(expected)
     })
+  })
+})
+
+describe('allOf keyword members', () => {
+  it.concurrent.each<[JSONSchema, EmitOptions | undefined, string]>([
+    [{ allOf: [{ type: 'integer' }, { minimum: 5 }] }, undefined, 'z.int().min(5)'],
+    [{ allOf: [{ type: 'string' }, { maxLength: 10 }] }, undefined, 'z.string().max(10)'],
+    [
+      { allOf: [{ minimum: 5 }] },
+      undefined,
+      "z.any().refine((val) => (typeof val !== 'number' || (val >= 5)))",
+    ],
+    [
+      { allOf: [{ type: 'integer' }, { minimum: 5 }] },
+      { paramIn: 'query' },
+      'z.string().regex(/^-?(?:0|[1-9]\\d*)$/).transform((val)=>Number(val)).pipe(z.number().int().min(5))',
+    ],
+  ])('zod(%o, %o) → %s', (schema, options, expected) => {
+    expect(zod(schema, 'Schema', false, options)).toBe(expected)
+  })
+})
+
+describe('object defaults and additionalProperties', () => {
+  it('keeps only declared keys of an object default', () => {
+    expect(
+      zod({
+        type: 'object',
+        properties: {
+          active: { type: 'boolean' },
+          fetch_connection_secrets: { type: 'boolean' },
+        },
+        default: { fetch_user_data: false, fetch_connection_secrets: false },
+      }),
+    ).toBe(
+      'z.object({active:z.boolean().exactOptional(),fetch_connection_secrets:z.boolean().exactOptional()}).default({"fetch_connection_secrets":false})',
+    )
+  })
+
+  it('emits a record for an additionalProperties-only schema', () => {
+    expect(
+      zod({
+        allOf: [
+          { type: 'object', properties: { a: { type: 'string' } } },
+          { additionalProperties: { type: 'number' } },
+        ],
+      }),
+    ).toBe(
+      'z.intersection(z.object({a:z.string().exactOptional()}),z.record(z.string(),z.number()))',
+    )
   })
 })

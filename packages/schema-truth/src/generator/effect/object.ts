@@ -4,7 +4,7 @@ import {
   isObjectPrototypeProperty,
   isStringWireLocation,
 } from '../../guard/index.js'
-import { effectPreprocess, ownProperties } from '../../helper/index.js'
+import { effectPreprocess, ownProperties, propertyEmitOptions } from '../../helper/index.js'
 import type { EmitOptions } from '../../options/index.js'
 import type { JSONSchema } from '../../parser/index.js'
 import { effectError, effectErrorPart, makeSafeKey } from '../../utils/index.js'
@@ -88,7 +88,12 @@ export function object(
   const required = new Set(schema.required)
   const props = Object.entries(schema.properties)
     .map(([key, propSchema]) => {
-      const parsed = effect(propSchema, rootName, isEffect, options)
+      const parsed = effect(
+        propSchema,
+        rootName,
+        isEffect,
+        propertyEmitOptions(key, propSchema, options) ?? options,
+      )
       if (!parsed) return null
       const safeKey = makeSafeKey(key)
       const isRequired = required.has(key)

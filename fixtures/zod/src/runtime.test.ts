@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vite-plus/test'
 import { User as DefsUser } from '../$defs/output.ts'
 import { Config as AdditionalPropertiesConfig } from '../additional-properties/output.ts'
+import { Bounded } from '../allof-keyword/output.ts'
+import { Amount } from '../not-int64/output.ts'
+import { Filters } from '../object-default/output.ts'
+import { Headers } from '../param-header-array/output.ts'
+import { Metadata } from '../pattern-hex/output.ts'
 import { Combined } from '../allof/output.ts'
 import { Filter as ParamDeepObjectFilter } from '../param-deep-object/output.ts'
 import { Ids as ParamFormNoExplodeIds } from '../param-form-no-explode/output.ts'
@@ -141,6 +146,34 @@ describe('zod fixtures: allof runtime', () => {
         },
       ])
     }
+  })
+})
+
+describe('zod fixtures: allof-keyword runtime', () => {
+  it('keeps a minimum folded onto the integer', () => {
+    expect(Bounded.safeParse(5).success).toBe(true)
+    expect(Bounded.safeParse(3).success).toBe(false)
+    expect(Bounded.safeParse(5.5).success).toBe(false)
+  })
+})
+
+describe('zod fixtures: pattern, bigint not, defaults and header arrays', () => {
+  it('treats a braced hex escape as a unicode range', () => {
+    expect(Metadata.safeParse('あ').success).toBe(true)
+  })
+
+  it('rejects the bigint 0 excluded by not.enum', () => {
+    expect(Amount.safeParse(0).success).toBe(false)
+    expect(Amount.safeParse(1)).toStrictEqual({ success: true, data: 1n })
+  })
+
+  it('drops undeclared keys from an object default', () => {
+    expect(Filters.parse(undefined)).toStrictEqual({ fetch_connection_secrets: false })
+  })
+
+  it('splits a header array on commas before reading integers', () => {
+    expect(Headers.parse({ 'x-ids': '1,2,3' })).toStrictEqual({ 'x-ids': [1, 2, 3] })
+    expect(Headers.safeParse({ 'x-ids': '007' }).success).toBe(false)
   })
 })
 
@@ -723,6 +756,10 @@ describe('zod fixtures: wire-query runtime', () => {
     expect(WireQuery.parse({})).toStrictEqual({ page: 1 })
   })
 
+  it('reads a JSON number and refuses integer text that is not a decimal integer', () => {
+    expect(WireQuery.parse({ page: '1', offset: '1e3' })).toStrictEqual({ page: 1, offset: 1000 })
+  })
+
   it('reports a bad array element at its index', () => {
     const result = WireQuery.safeParse({ ids: ['1', 'x'] })
     expect(result.error?.issues.map((issue) => issue.path)).toStrictEqual([['ids', 1]])
@@ -732,7 +769,12 @@ describe('zod fixtures: wire-query runtime', () => {
     [{ sort: '2' }, 'sort'],
     [{ active: 'false' }, 'active'],
     [{ offset: '-1' }, 'offset'],
+    [{ offset: '0x10' }, 'offset'],
+    [{ offset: '' }, 'offset'],
+    [{ page: '007' }, 'page'],
     [{ skip: '0' }, 'skip'],
+    [{ skip: '1.0' }, 'skip'],
+    [{ skip: '1e3' }, 'skip'],
     [{ skip: 'abc' }, 'skip'],
     [{ cursor: '-1' }, 'cursor'],
   ])('rejects %o at %s', (input, key) => {

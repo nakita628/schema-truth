@@ -9,21 +9,28 @@ import {
   isStringWireLocation,
 } from '../../guard/index.js'
 import {
+  constraintMessage,
+  constraintPredicate,
   effectPreprocess,
   effectWrap as _effectWrap,
+  foldAllOfMembers,
   hasParameterSerialization,
   impliedWireType,
+  isKeywordOnlyMember,
   isNullTextRead,
   isPrimitiveUnion,
   itemsSchemaOf,
   jsLiteral,
+  isBigintFormat,
   notPredicate,
+  valueListLiteral,
   parameterReaders,
   refTarget,
   stringboolPattern,
   stringboolTruthyPattern,
   unionPrimitiveTypes,
   wireArrayOnce,
+  wireNumericKind,
   withoutParameterSerialization,
 } from '../../helper/index.js'
 import type { EffectWrapOptions } from '../../helper/index.js'
@@ -32,7 +39,7 @@ import type { JSONSchema } from '../../parser/index.js'
 import { effectError, effectErrorPart, normalizeTypes } from '../../utils/index.js'
 import { _enum } from './enum.js'
 import { int64Input, integer, isInt64 } from './integer.js'
-import { number } from './number.js'
+import { number, wireNumericInput } from './number.js'
 import { object } from './object.js'
 import { string } from './string.js'
 
@@ -114,6 +121,12 @@ export function effect(
   return node(schema, rootName, isEffect, options)
 }
 
+/** A keyword-only `allOf` member: the keywords apply when the value has their type. */
+function keywordConstraint(schema: JSONSchema): string {
+  const body = constraintPredicate(schema, 'input')
+  return `Schema.Unknown.check(Schema.makeFilter((input) => ${body}${effectErrorPart(constraintMessage(schema))}))`
+}
+
 function node(
   schema: JSONSchema,
   rootName: string,
@@ -131,7 +144,11 @@ function node(
     return { stringWire: true, ...(isNullTextRead(s) && { nullText: true }) }
   }
   const effectWrap = (effectStr: string, s: JSONSchema): string =>
-    _effectWrap(effectStr, s, { ...codeExtOpts, ...wireOptions(s) })
+    _effectWrap(effectStr, s, {
+      ...codeExtOpts,
+      ...wireOptions(s),
+      ...(options?.definitions !== undefined && { definitions: options.definitions }),
+    })
   const wireArray = (v: string) =>
     isStringWireParam ? effectPreprocess([wireArrayOnce('input')], v) : v
   // What reads a literal's input into the literal's type: on the wire the text is coerced,
@@ -139,7 +156,7 @@ function node(
   const literalInput = (values: readonly unknown[]): string | undefined => {
     if (values.every((v) => typeof v === 'number')) {
       if (isInt64(schema)) return int64Input(isWireCoerced)
-      if (isWireCoerced) return 'Schema.FiniteFromString'
+      if (isWireCoerced) return wireNumericInput(wireNumericKind(schema, values))
     }
     if (isWireCoerced && values.every((v) => typeof v === 'boolean')) return stringbool()
     return undefined
@@ -194,9 +211,12 @@ function node(
     if (schema.allOf.length === 0) return effectWrap('Schema.Unknown', schema)
     const nullable = isNullable(schema) || schema.allOf.some(isNullTypeMember)
     const defaultValue = schema.allOf.find(isDefaultOnlyMember)?.default
-    const schemas = schema.allOf
-      .filter((s) => !isShapelessMember(s))
-      .map((s) => effect(s, rootName, isEffect, options))
+    const schemas = foldAllOfMembers(
+      schema.allOf.filter((s) => !isShapelessMember(s)),
+      isWireCoerced,
+    ).map((s) =>
+      isKeywordOnlyMember(s) ? keywordConstraint(s) : effect(s, rootName, isEffect, options),
+    )
     if (schemas.length === 0) return effectWrap('Schema.Unknown', { ...schema, nullable })
     const intersected = schemas.length === 1 ? schemas[0] : intersect(schemas)
     const allOfMessage = schema['x-allOf-message']
@@ -218,12 +238,13 @@ function node(
     const notMessage = schema['x-not-message']
     const filterOpts = effectErrorPart(notMessage)
     const predicate = ((): string | undefined => {
-      const shared = notPredicate(inner, 'input')
+      const bigint = isBigintFormat(withoutNot)
+      const shared = notPredicate(inner, 'input', 'input', bigint)
       if (shared !== undefined) return shared
       if (Array.isArray(inner.enum)) {
-        // `Array<string>.includes(unknown)` is a type error (the predicate's `val`
+        // `Array<string>.includes(unknown)` is a type error (the predicate's `input`
         // is `unknown`); compare via `.some(===)` which accepts any operand.
-        return `(input) => !${JSON.stringify(inner.enum)}.some((item) => item === input)`
+        return `(input) => !${valueListLiteral(inner.enum, bigint)}.some((item) => item === input)`
       }
       return undefined
     })()
@@ -385,6 +406,11 @@ function node(
     return effectWrap('Schema.Date', schema)
   }
   if (types.length === 1 && types[0] === 'null') return effectWrap('Schema.Null', schema)
+
+  // An `allOf` member that is only `additionalProperties` still constrains every value.
+  if (typeof schema.additionalProperties === 'object') {
+    return effectWrap(object(schema, rootName, isEffect, options), schema)
+  }
 
   return effectWrap('Schema.Unknown', schema)
 }
