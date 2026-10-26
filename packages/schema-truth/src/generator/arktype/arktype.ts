@@ -29,7 +29,9 @@ import {
   isNullTextRead,
   isPrimitiveUnion,
   itemsSchemaOf,
+  isBigintFormat,
   notPredicate,
+  valueListLiteral,
   parameterReaders,
   schemaNamer,
   stringboolPattern,
@@ -299,10 +301,11 @@ function node(
     if (typeof inner !== 'object' || inner === null) return arktypeWrap('"unknown"', schema)
     const notMessage = schema['x-not-message']
     const predicate = ((): string | undefined => {
-      const shared = notPredicate(inner, 'data', 'data: unknown')
+      const bigint = isBigintFormat(withoutNot)
+      const shared = notPredicate(inner, 'data', 'data: unknown', bigint)
       if (shared !== undefined) return shared
       if (Array.isArray(inner.enum)) {
-        return `(data: unknown) => !${JSON.stringify(inner.enum)}.includes(data as never)`
+        return `(data: unknown) => !${valueListLiteral(inner.enum, bigint)}.includes(data as never)`
       }
       return undefined
     })()
@@ -523,6 +526,11 @@ function node(
     return arktypeWrap('"Date"', schema)
   }
   if (types.length === 1 && types[0] === 'null') return arktypeWrap('"null"', schema)
+
+  // An `allOf` member that is only `additionalProperties` still constrains every value.
+  if (typeof schema.additionalProperties === 'object') {
+    return readonly(arktypeWrap(object(schema, rootName, isArktype, options), schema))
+  }
 
   return arktypeWrap('"unknown"', schema)
 }

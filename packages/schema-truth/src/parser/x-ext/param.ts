@@ -16,6 +16,25 @@ import type { PARAM_LOCATIONS, PARAM_STYLES } from '../../constants/index.js'
 export type ParamIn = (typeof PARAM_LOCATIONS)[number]
 
 /**
+ * Per-property OpenAPI serialization, for one property of an object schema emitted
+ * with `paramIn`. The root `style` / `explode` / `allowEmptyValue` options read the
+ * object itself; these keywords read that property's own text (`x-ids: 1,2,3` splits
+ * on commas before the elements are coerced). They survive inside `$defs`, unlike a
+ * generator option keyed by property name.
+ *
+ * Honoured by Zod, Valibot, Effect Schema and ArkType when the object is emitted with
+ * `paramIn`. A no-op for TypeBox, Ajv and Yup, and when `paramIn` is unset.
+ */
+export type XExtParam = {
+  /** The property's `style`. Defaults to the location's style when unset. */
+  readonly 'x-style'?: ParamStyle
+  /** The property's `explode`. Defaults to `true` for `style: form`, otherwise `false`. */
+  readonly 'x-explode'?: boolean
+  /** The property's `allowEmptyValue`: an empty value reads as an absent one. */
+  readonly 'x-allowEmptyValue'?: boolean
+}
+
+/**
  * The `style` of an OpenAPI Parameter Object: how its text is serialised. Defaults to
  * `form` for `query` / `cookie` / `formData` and `simple` for `path` / `header`.
  *

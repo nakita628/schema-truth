@@ -153,6 +153,10 @@ describe('arktype', () => {
         { not: { enum: ['a', 'b'] } },
         `type("unknown").narrow((data: unknown) => !["a","b"].includes(data as never))`,
       ],
+      [
+        { type: 'integer', format: 'int64', not: { enum: [0] } },
+        'type("bigint | number.integer").or(/^-?\\d+$/).pipe((data) => BigInt(data)).narrow((data, ctx) => (data >= -9223372036854775808n && data <= 9223372036854775807n) || ctx.mustBe("an int64")).narrow((data: unknown) => ![0n].includes(data as never))',
+      ],
     ])('arktype(%o) → %s', (input, expected) => {
       expect(arktype(input)).toBe(expected)
     })

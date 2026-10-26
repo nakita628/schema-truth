@@ -3,6 +3,9 @@ import { describe, expect, it } from 'vite-plus/test'
 import { User as DefsUser } from '../$defs/output.ts'
 import { Config as AdditionalConfig } from '../additional-properties/output.ts'
 import { Bounded } from '../allof-keyword/output.ts'
+import { Amount } from '../not-int64/output.ts'
+import { Headers } from '../param-header-array/output.ts'
+import { Metadata } from '../pattern-hex/output.ts'
 import { Combined as AllofCombined } from '../allof/output.ts'
 import { Merged as AllofMessageMerged } from '../allof-message/output.ts'
 import { StringOrNumber as AnyofStringOrNumber } from '../anyof/output.ts'
@@ -141,6 +144,22 @@ describe('allof-keyword', () => {
     expect(Bounded(5)).toBe(5)
     expect(Bounded(3)).toBeInstanceOf(type.errors)
     expect(Bounded(5.5)).toBeInstanceOf(type.errors)
+  })
+})
+
+describe('pattern, bigint not and header arrays', () => {
+  it('treats a braced hex escape as a unicode range', () => {
+    expect(Metadata('あ')).toBe('あ')
+  })
+
+  it('rejects the bigint 0 excluded by not.enum', () => {
+    expect(Amount(0)).toBeInstanceOf(type.errors)
+    expect(Amount(1)).toBe(1n)
+  })
+
+  it('splits a header array on commas before reading integers', () => {
+    expect(Headers({ 'x-ids': '1,2,3' })).toStrictEqual({ 'x-ids': [1, 2, 3] })
+    expect(Headers({ 'x-ids': '007' })).toBeInstanceOf(type.errors)
   })
 })
 

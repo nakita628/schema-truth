@@ -208,5 +208,27 @@ describe('helper', () => {
     it('coerces stringified booleans for boolean schemas', () => {
       expect(coerceDefault({ type: 'boolean' }, 'true')).toStrictEqual({ keep: true, value: true })
     })
+
+    it('drops object keys the schema does not declare', () => {
+      expect(
+        coerceDefault(
+          { type: 'object', properties: { fetch_connection_secrets: { type: 'boolean' } } },
+          { fetch_user_data: false, fetch_connection_secrets: false },
+        ),
+      ).toStrictEqual({ keep: true, value: { fetch_connection_secrets: false } })
+    })
+
+    it('keeps undeclared keys when additional properties are allowed', () => {
+      expect(
+        coerceDefault(
+          {
+            type: 'object',
+            additionalProperties: true,
+            properties: { a: { type: 'boolean' } },
+          },
+          { a: true, extra: 1 },
+        ),
+      ).toStrictEqual({ keep: true, value: { a: true, extra: 1 } })
+    })
   })
 })

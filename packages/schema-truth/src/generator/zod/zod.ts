@@ -18,7 +18,9 @@ import {
   isNullTextRead,
   isPrimitiveUnion,
   itemsSchemaOf,
+  isBigintFormat,
   notPredicate,
+  valueListLiteral,
   refTarget,
   unionPrimitiveTypes,
   wireArrayOnce,
@@ -64,11 +66,14 @@ const ZOD_ISSUE_CODES = [
  * The `not` predicate of an inner schema, as the source of a `(val) => ...` arrow, or
  * `undefined` when the inner schema has none this generator can express.
  */
-function zodNotPredicate(inner: JSONSchema): string | undefined {
+function zodNotPredicate(inner: JSONSchema, parent: JSONSchema): string | undefined {
   if (inner.$ref) return undefined
-  const shared = notPredicate(inner, 'val')
+  const bigint = isBigintFormat(parent)
+  const shared = notPredicate(inner, 'val', 'val', bigint)
   if (shared !== undefined) return shared
-  if (Array.isArray(inner.enum)) return `(val) => !${JSON.stringify(inner.enum)}.includes(val)`
+  if (Array.isArray(inner.enum)) {
+    return `(val) => !${valueListLiteral(inner.enum, bigint)}.includes(val)`
+  }
   if (inner.oneOf || inner.anyOf || inner.allOf) {
     return `(val) => !${zod(inner)}.safeParse(val).success`
   }
@@ -122,7 +127,11 @@ function node(
   const isWireCoerced = isStringWireParam && schema['x-coerce'] !== false
   const codeExtOpts: CodeExtensionOptions =
     options?.unsafeCodeExtensions === true ? { unsafeCodeExtensions: true } : {}
-  const zodWrap = (zodStr: string, s: JSONSchema): string => _zodWrap(zodStr, s, codeExtOpts)
+  const zodWrap = (zodStr: string, s: JSONSchema): string =>
+    _zodWrap(zodStr, s, {
+      ...codeExtOpts,
+      ...(options?.definitions !== undefined && { definitions: options.definitions }),
+    })
   const readonly = (v: string) => (options?.readonly ? `${v}.readonly()` : v)
   const wireArray = (v: string) =>
     isStringWireParam ? `z.preprocess(${wireArrayOnce('val')},${v})` : v
@@ -229,7 +238,7 @@ function node(
     if (typeof inner !== 'object' || inner === null) return zodWrap('z.any()', schema)
     const predicate = inner.$ref
       ? `(val) => !${ref(inner, '', false)}.safeParse(val).success`
-      : zodNotPredicate(inner)
+      : zodNotPredicate(inner, withoutNot)
     // A `type` beside `not` still holds: the predicate narrows that type, not any value.
     if (withoutNot.type !== undefined) {
       const base = zod(withoutNot, rootName, isZod, options)
@@ -394,6 +403,11 @@ function node(
     const errorMessage = schema['x-error-message']
     const errorArg = errorMessage ? zodError(errorMessage) : ''
     return zodWrap(`z.null(${errorArg})`, schema)
+  }
+
+  // An `allOf` member that is only `additionalProperties` still constrains every value.
+  if (typeof schema.additionalProperties === 'object') {
+    return readonly(zodWrap(object(schema, rootName, isZod, options), schema))
   }
 
   return zodWrap('z.any()', schema)

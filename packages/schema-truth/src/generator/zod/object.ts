@@ -4,6 +4,7 @@ import {
   isObjectPrototypeProperty,
   isStringWireLocation,
 } from '../../guard/index.js'
+import { propertyEmitOptions } from '../../helper/parameter.js'
 import type { EmitOptions } from '../../options/index.js'
 import type { JSONSchema } from '../../parser/index.js'
 import { issueMessageExpression, makeSafeKey, zodError, zodErrorPart } from '../../utils/index.js'
@@ -91,7 +92,12 @@ export function object(
   const required = new Set(schema.required)
   const props = Object.entries(schema.properties)
     .map(([key, propSchema]) => {
-      const parsed = zod(propSchema, rootName, isZod, options)
+      const parsed = zod(
+        propSchema,
+        rootName,
+        isZod,
+        propertyEmitOptions(key, propSchema, options) ?? options,
+      )
       if (!parsed) return null
       const safeKey = makeSafeKey(key)
       return `${safeKey}:${parsed}${required.has(key) ? '' : '.exactOptional()'}`

@@ -4,7 +4,7 @@ import {
   isObjectPrototypeProperty,
   isStringWireLocation,
 } from '../../guard/index.js'
-import { isOptionalByDefault, ownProperties } from '../../helper/index.js'
+import { isOptionalByDefault, ownProperties, propertyEmitOptions } from '../../helper/index.js'
 import type { EmitOptions } from '../../options/index.js'
 import type { JSONSchema } from '../../parser/index.js'
 import {
@@ -109,7 +109,12 @@ export function object(
   const hasOwnDefault = Object.values(schema.properties).some(isOptionalByDefault)
   const props = Object.entries(schema.properties)
     .map(([key, propSchema]) => {
-      const parsed = valibot(propSchema, rootName, isValibot, options)
+      const parsed = valibot(
+        propSchema,
+        rootName,
+        isValibot,
+        propertyEmitOptions(key, propSchema, options) ?? options,
+      )
       if (!parsed) return null
       const safeKey = makeSafeKey(key)
       return required.has(key) || isOptionalByDefault(propSchema)

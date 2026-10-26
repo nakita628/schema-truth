@@ -4,7 +4,7 @@ import {
   isQuoted,
   isStringWireLocation,
 } from '../../guard/index.js'
-import { arktypePreprocess, ownProperties } from '../../helper/index.js'
+import { arktypePreprocess, ownProperties, propertyEmitOptions } from '../../helper/index.js'
 import type { EmitOptions } from '../../options/index.js'
 import type { JSONSchema } from '../../parser/index.js'
 import { makeSafeKey } from '../../utils/index.js'
@@ -112,7 +112,12 @@ export function object(
   const required = new Set(schema.required)
   const props = Object.entries(schema.properties)
     .map(([key, propSchema]) => {
-      const parsed = arktype(propSchema, rootName, isArktype, options)
+      const parsed = arktype(
+        propSchema,
+        rootName,
+        isArktype,
+        propertyEmitOptions(key, propSchema, options) ?? options,
+      )
       if (!parsed) return null
       const isRequired = required.has(key)
       const baseSafeKey = makeSafeKey(key)

@@ -14,6 +14,7 @@ const PARAM_FIXTURES: { readonly [name: string]: GenerateOptions } = {
   'param-form-no-explode': { paramIn: 'query', explode: false },
   'param-deep-object': { paramIn: 'query', style: 'deepObject' },
   'param-json-content': { paramIn: 'query', contentType: 'application/json' },
+  'param-header-array': { paramIn: 'header' },
 }
 
 const fixtures = readdirSync(fixturesDir, { withFileTypes: true })

@@ -295,6 +295,10 @@ describe('effect', () => {
         { not: { enum: ['a', 'b'] } },
         'Schema.Unknown.check(Schema.makeFilter((input) => !["a","b"].some((item) => item === input)))',
       ],
+      [
+        { type: 'integer', format: 'int64', not: { enum: [0] } },
+        'Schema.Union([Schema.BigInt,Schema.Number.check(Schema.isInt()),Schema.String.check(Schema.isPattern(/^-?\\d+$/))]).pipe(Schema.decodeTo(Schema.BigInt,SchemaTransformation.transform({decode:(input)=>BigInt(input),encode:(output)=>output}))).check(Schema.isBetweenBigInt({minimum:-9223372036854775808n,maximum:9223372036854775807n})).check(Schema.makeFilter((input) => ![0n].some((item) => item === input)))',
+      ],
     ])('effect(%o) → %s', (input, expected) => {
       expect(effect(input)).toBe(expected)
     })

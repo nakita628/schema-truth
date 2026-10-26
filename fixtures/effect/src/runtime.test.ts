@@ -3,6 +3,10 @@ import { describe, expect, it } from 'vite-plus/test'
 
 import { Config as AdditionalPropsConfig } from '../additional-properties/output.ts'
 import { Bounded } from '../allof-keyword/output.ts'
+import { Amount } from '../not-int64/output.ts'
+import { Filters } from '../object-default/output.ts'
+import { Headers } from '../param-header-array/output.ts'
+import { Metadata } from '../pattern-hex/output.ts'
 import { Combined } from '../allof/output.ts'
 import { Merged } from '../allof-message/output.ts'
 import { StringOrNumber } from '../anyof/output.ts'
@@ -117,6 +121,30 @@ describe('allof-keyword runtime', () => {
     expect(Schema.decodeUnknownSync(Bounded)(5)).toBe(5)
     expect(Result.isSuccess(decode(Bounded, 3))).toBe(false)
     expect(Result.isSuccess(decode(Bounded, 5.5))).toBe(false)
+  })
+})
+
+describe('pattern, bigint not, defaults and header arrays', () => {
+  it('treats a braced hex escape as a unicode range', () => {
+    expect(Schema.decodeUnknownSync(Metadata)('あ')).toBe('あ')
+  })
+
+  it('rejects the bigint 0 excluded by not.enum', () => {
+    expect(Result.isSuccess(decode(Amount, 0))).toBe(false)
+    expect(Schema.decodeUnknownSync(Amount)(1)).toBe(1n)
+  })
+
+  it('drops undeclared keys from an object default', () => {
+    expect(Schema.decodeUnknownSync(Filters)(undefined)).toStrictEqual({
+      fetch_connection_secrets: false,
+    })
+  })
+
+  it('splits a header array on commas before reading integers', () => {
+    expect(Schema.decodeUnknownSync(Headers)({ 'x-ids': '1,2,3' })).toStrictEqual({
+      'x-ids': [1, 2, 3],
+    })
+    expect(Result.isSuccess(decode(Headers, { 'x-ids': '007' }))).toBe(false)
   })
 })
 

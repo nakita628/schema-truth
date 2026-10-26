@@ -4,7 +4,8 @@ import { coerceDefault } from '../utils/index.js'
 import { readCodeExtension } from './code-extensions.js'
 import type { CodeExtensionOptions } from './code-extensions.js'
 import { serializeJSValue } from './meta.js'
-import { examplesOf } from './schema.js'
+import { examplesOf, schemaWithDefaultTarget } from './schema.js'
+import type { SchemaDefinitions } from './schema.js'
 import { jsLiteral } from './value.js'
 import { isNullMatchedFirst, wireNullText } from './wire.js'
 
@@ -21,6 +22,8 @@ export type EffectWrapOptions = CodeExtensionOptions & {
    * schema is also made `NullOr` unless a `null` literal of its own matches first.
    */
   readonly nullText?: boolean
+  /** Definitions a `default` beside a `$ref` is reconciled against. */
+  readonly definitions?: SchemaDefinitions
 }
 
 /** `inner` read after `reader`, a `(input) => ...` arrow over the raw value. */
@@ -84,8 +87,9 @@ export function effectWrap(
   // the encoded key optional. The default is an `Encoded` value, which is what
   // `coerceDefault` produces — except on the string wire, where the encoded side
   // is text and the default is the decoded value instead.
+  const described = schemaWithDefaultTarget(schema, options?.definitions)
   const defaultResult =
-    schema.default !== undefined ? coerceDefault(schema, schema.default) : undefined
+    schema.default !== undefined ? coerceDefault(described, schema.default) : undefined
   const decodingDefault =
     options?.stringWire === true ? 'Schema.withDecodingDefaultType' : 'Schema.withDecodingDefault'
   const withDefault = defaultResult?.keep

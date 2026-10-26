@@ -322,6 +322,10 @@ describe('valibot', () => {
         { not: { enum: ['a', 'b'] } },
         'v.custom<unknown>((input) => !["a","b"].some((item) => item === input))',
       ],
+      [
+        { type: 'integer', format: 'int64', not: { enum: [0] } },
+        'v.pipe(v.union([v.bigint(),v.pipe(v.number(),v.integer()),v.pipe(v.string(),v.regex(/^-?\\d+$/))]),v.transform((input)=>BigInt(input)),v.minValue(-9223372036854775808n),v.maxValue(9223372036854775807n),v.check((input) => ![0n].some((item) => item === input)))',
+      ],
     ])('valibot(%o) → %s', (input, expected) => {
       expect(valibot(input)).toBe(expected)
     })

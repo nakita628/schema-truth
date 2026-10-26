@@ -16,7 +16,21 @@ export function emitOptionsOf(options: GenerateOptions | undefined): EmitOptions
     ...(options?.explode !== undefined && { explode: options.explode }),
     ...(options?.allowEmptyValue !== undefined && { allowEmptyValue: options.allowEmptyValue }),
     ...(options?.contentType !== undefined && { contentType: options.contentType }),
+    ...(options?.properties !== undefined && { properties: options.properties }),
+    ...(options?.definitions !== undefined && { definitions: options.definitions }),
   }
+}
+
+/**
+ * `options.definitions` plus the document's own `$defs` / `definitions`. The document
+ * wins on a shared name. `undefined` when neither holds a schema.
+ */
+export function definitionsOf(
+  options: EmitOptions | undefined,
+  document: { readonly [name: string]: JSONSchema },
+): EmitOptions['definitions'] {
+  if (Object.keys(document).length === 0 && options?.definitions === undefined) return undefined
+  return { ...options?.definitions, ...document }
 }
 
 /**

@@ -432,5 +432,10 @@ export function typebox(
     return typeboxWrap(tbPrim('Type.Null', schema, [], hostRef), schema)
   }
 
+  // An `allOf` member that is only `additionalProperties` still constrains every value.
+  if (typeof schema.additionalProperties === 'object') {
+    return readonly(typeboxWrap(object(schema, rootName, isTypebox, options), schema))
+  }
+
   return typeboxWrap(tbPrim('Type.Any', schema, [], hostRef), schema)
 }

@@ -1,6 +1,7 @@
 import type { JSONSchema } from '../parser/index.js'
 import { coerceDefault, makeSafeKey } from '../utils/index.js'
-import { examplesOf } from './schema.js'
+import { examplesOf, schemaWithDefaultTarget } from './schema.js'
+import type { SchemaDefinitions } from './schema.js'
 
 /**
  * Host `$ref` name for OpenAPI component registration (hono-openapi
@@ -45,9 +46,13 @@ export function typeboxMetaOpts(schema: JSONSchema, ref?: string): readonly stri
  * `stringWire` (for `query`/`path` coercion) emits the default in its string-wire
  * form (`'1'` / `'true'`), since the coerced `Type.String(...)` input is a string.
  */
-export function typeboxDefaultOpt(schema: JSONSchema, stringWire = false): readonly string[] {
+export function typeboxDefaultOpt(
+  schema: JSONSchema,
+  stringWire = false,
+  definitions?: SchemaDefinitions,
+): readonly string[] {
   if (schema.default === undefined) return []
-  const result = coerceDefault(schema, schema.default)
+  const result = coerceDefault(schemaWithDefaultTarget(schema, definitions), schema.default)
   if (!result.keep) return []
   const value = stringWire ? String(result.value) : result.value
   const formatLiteral =

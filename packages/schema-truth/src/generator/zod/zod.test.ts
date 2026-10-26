@@ -329,6 +329,14 @@ describe('zod', () => {
         [{ type: 'integer', not: { format: 'int32' } }, 'z.int()'],
         [{ not: { const: 42 } }, 'z.any().refine((val) => val !== 42)'],
         [{ not: { enum: ['a', 'b'] } }, 'z.any().refine((val) => !["a","b"].includes(val))'],
+        [
+          { type: 'integer', format: 'int64', not: { enum: [0] } },
+          String.raw`z.union([z.bigint(),z.number().int(),z.string().regex(/^-?\d+$/)]).transform((val)=>BigInt(val)).pipe(z.int64()).refine((val) => ![0n].includes(val))`,
+        ],
+        [
+          { type: 'integer', format: 'int64', not: { const: 0 } },
+          String.raw`z.union([z.bigint(),z.number().int(),z.string().regex(/^-?\d+$/)]).transform((val)=>BigInt(val)).pipe(z.int64()).refine((val) => val !== 0n)`,
+        ],
       ])('zod(%o) → %s', (input, expected) => {
         expect(zod(input)).toBe(expected)
       })
@@ -2185,6 +2193,31 @@ describe('zod parameter serialization', () => {
     expect(zod(schema, 'Schema', false, options)).toBe(expected)
   })
 
+  it('reads a header array property with its own style', () => {
+    const wire =
+      'z.preprocess((val)=>(val===undefined||Array.isArray(val)?val:[val]),z.array(z.string().regex(/^-?(?:0|[1-9]\\d*)$/).transform((val)=>Number(val)).pipe(z.number().int())))'
+    const reader =
+      "(val)=>{if(typeof val!=='string')return val;const text=val;return (text===''?[]:text.split(\",\"))}"
+    expect(
+      zod(
+        {
+          type: 'object',
+          properties: {
+            'x-ids': {
+              type: 'array',
+              items: { type: 'integer' },
+              'x-style': 'simple',
+              'x-explode': false,
+            },
+          },
+        },
+        'Schema',
+        false,
+        { paramIn: 'header' },
+      ),
+    ).toBe(`z.object({"x-ids":z.preprocess(${reader},${wire}).exactOptional()})`)
+  })
+
   describe('#106: a $ref beside a default is wrapped once', () => {
     it.concurrent.each<[JSONSchema, EmitOptions | undefined, string]>([
       [
@@ -2201,6 +2234,21 @@ describe('zod parameter serialization', () => {
         'CountSchema.default(3)',
       ],
       [{ type: 'integer', format: 'uint32' }, undefined, 'z.uint32()'],
+      [
+        {
+          $ref: '#/$defs/Filters',
+          default: { fetch_user_data: false, fetch_connection_secrets: false },
+        },
+        {
+          definitions: {
+            Filters: {
+              type: 'object',
+              properties: { fetch_connection_secrets: { type: 'boolean' } },
+            },
+          },
+        },
+        'FiltersSchema.default({"fetch_connection_secrets":false})',
+      ],
     ])('zod(%o, %o) → %s', (schema, options, expected) => {
       expect(zod(schema, 'Schema', false, options)).toBe(expected)
     })
@@ -2223,5 +2271,35 @@ describe('allOf keyword members', () => {
     ],
   ])('zod(%o, %o) → %s', (schema, options, expected) => {
     expect(zod(schema, 'Schema', false, options)).toBe(expected)
+  })
+})
+
+describe('object defaults and additionalProperties', () => {
+  it('keeps only declared keys of an object default', () => {
+    expect(
+      zod({
+        type: 'object',
+        properties: {
+          active: { type: 'boolean' },
+          fetch_connection_secrets: { type: 'boolean' },
+        },
+        default: { fetch_user_data: false, fetch_connection_secrets: false },
+      }),
+    ).toBe(
+      'z.object({active:z.boolean().exactOptional(),fetch_connection_secrets:z.boolean().exactOptional()}).default({"fetch_connection_secrets":false})',
+    )
+  })
+
+  it('emits a record for an additionalProperties-only schema', () => {
+    expect(
+      zod({
+        allOf: [
+          { type: 'object', properties: { a: { type: 'string' } } },
+          { additionalProperties: { type: 'number' } },
+        ],
+      }),
+    ).toBe(
+      'z.intersection(z.object({a:z.string().exactOptional()}),z.record(z.string(),z.number()))',
+    )
   })
 })

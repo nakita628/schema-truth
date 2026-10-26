@@ -21,7 +21,9 @@ import {
   isPrimitiveUnion,
   itemsSchemaOf,
   jsLiteral,
+  isBigintFormat,
   notPredicate,
+  valueListLiteral,
   parameterReaders,
   refTarget,
   stringboolPattern,
@@ -142,7 +144,11 @@ function node(
     return { stringWire: true, ...(isNullTextRead(s) && { nullText: true }) }
   }
   const effectWrap = (effectStr: string, s: JSONSchema): string =>
-    _effectWrap(effectStr, s, { ...codeExtOpts, ...wireOptions(s) })
+    _effectWrap(effectStr, s, {
+      ...codeExtOpts,
+      ...wireOptions(s),
+      ...(options?.definitions !== undefined && { definitions: options.definitions }),
+    })
   const wireArray = (v: string) =>
     isStringWireParam ? effectPreprocess([wireArrayOnce('input')], v) : v
   // What reads a literal's input into the literal's type: on the wire the text is coerced,
@@ -232,12 +238,13 @@ function node(
     const notMessage = schema['x-not-message']
     const filterOpts = effectErrorPart(notMessage)
     const predicate = ((): string | undefined => {
-      const shared = notPredicate(inner, 'input')
+      const bigint = isBigintFormat(withoutNot)
+      const shared = notPredicate(inner, 'input', 'input', bigint)
       if (shared !== undefined) return shared
       if (Array.isArray(inner.enum)) {
-        // `Array<string>.includes(unknown)` is a type error (the predicate's `val`
+        // `Array<string>.includes(unknown)` is a type error (the predicate's `input`
         // is `unknown`); compare via `.some(===)` which accepts any operand.
-        return `(input) => !${JSON.stringify(inner.enum)}.some((item) => item === input)`
+        return `(input) => !${valueListLiteral(inner.enum, bigint)}.some((item) => item === input)`
       }
       return undefined
     })()
@@ -399,6 +406,11 @@ function node(
     return effectWrap('Schema.Date', schema)
   }
   if (types.length === 1 && types[0] === 'null') return effectWrap('Schema.Null', schema)
+
+  // An `allOf` member that is only `additionalProperties` still constrains every value.
+  if (typeof schema.additionalProperties === 'object') {
+    return effectWrap(object(schema, rootName, isEffect, options), schema)
+  }
 
   return effectWrap('Schema.Unknown', schema)
 }

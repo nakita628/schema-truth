@@ -1,5 +1,6 @@
 import { DEFAULT_ROOT_NAME, UNSAFE_GENERATED_MARKER } from '../../constants/index.js'
 import {
+  definitionsOf,
   emitOptionsOf,
   findCodeExtensionKeysInSchema,
   hasRootSelfReference,
@@ -25,16 +26,18 @@ const EFFECT_ROOT_FALLBACK = `${DEFAULT_ROOT_NAME}_`
  */
 export function schemaToEffect(schema: JSONSchema, options?: GenerateOptions): string {
   const exportType = options?.exportType ?? true
-  const emitOptions = emitOptionsOf(options)
+  const baseOptions = emitOptionsOf(options)
   const codeExtensionsPresent =
-    emitOptions.unsafeCodeExtensions === true && findCodeExtensionKeysInSchema(schema).length > 0
-  const toName = schemaNamer(emitOptions.openapi)
+    baseOptions.unsafeCodeExtensions === true && findCodeExtensionKeysInSchema(schema).length > 0
+  const toName = schemaNamer(baseOptions.openapi)
   // A root named `Schema` would collide with `import { Schema } from "effect"`.
   const pascalTitle = rootNameOf(schema, toName, EFFECT_ROOT_FALLBACK)
   const plan = planDocument(
     schema,
     pascalTitle === DEFAULT_ROOT_NAME ? EFFECT_ROOT_FALLBACK : pascalTitle,
   )
+  const definitions = definitionsOf(baseOptions, plan.definitions)
+  const emitOptions = definitions === undefined ? baseOptions : { ...baseOptions, definitions }
   const { rootName } = plan
   const needsTypeDef = plan.hasDefinitions || hasRootSelfReference(schema)
 

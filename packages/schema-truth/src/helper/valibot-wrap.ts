@@ -4,7 +4,8 @@ import { coerceDefault } from '../utils/index.js'
 import { readCodeExtension } from './code-extensions.js'
 import type { CodeExtensionOptions } from './code-extensions.js'
 import { serializeJSValue } from './meta.js'
-import { examplesOf } from './schema.js'
+import { examplesOf, schemaWithDefaultTarget } from './schema.js'
+import type { SchemaDefinitions } from './schema.js'
 import { jsLiteral } from './value.js'
 import { isNullMatchedFirst, wireDefaultValue, wireNullText } from './wire.js'
 
@@ -21,6 +22,8 @@ export type ValibotWrapOptions = CodeExtensionOptions & {
    * such a schema is also made nullable unless a `null` literal of its own matches first.
    */
   readonly nullText?: boolean
+  /** Definitions a `default` beside a `$ref` is reconciled against. */
+  readonly definitions?: SchemaDefinitions
 }
 
 /** A default as the Valibot literal of the schema's input: a bigint for a 64-bit integer. */
@@ -62,8 +65,9 @@ export function valibotWrap(
   const withNullText = nullText
     ? `v.pipe(v.unknown(),v.transform(${wireNullText('input')}),${withNullable})`
     : withNullable
+  const described = schemaWithDefaultTarget(schema, options?.definitions)
   const defaultResult =
-    schema.default !== undefined ? coerceDefault(schema, schema.default) : undefined
+    schema.default !== undefined ? coerceDefault(described, schema.default) : undefined
   const withDefault = defaultResult?.keep
     ? `v.optional(${withNullText},${defaultLiteral(schema, defaultResult.value, options?.stringWire === true)})`
     : withNullText
