@@ -142,18 +142,20 @@ jobs:
       # Trusted publishing needs npm 11.5.1 or newer. The vite-plus shim can be
       # older, and an older CLI never exchanges the OIDC token.
       # Publish with the npm that sits beside the selected Node, after npm 11.
+      # A rejected exchange is hidden as a login error unless the log level is raised.
       - name: Publish with npm trusted publishing
         working-directory: packages/schema-truth
         run: |
-          node_bin=$(dirname "$(node -p process.execPath)")
-          "$node_bin/npm" install -g npm@11
-          "$node_bin/npm" --version
-          if [ -n "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ]; then
-            echo "oidc request token is set"
-          else
-            echo "oidc request token is missing"
-          fi
-          "$node_bin/npm" publish --access public --provenance
+          node_dir=$(dirname "$(node -p process.execPath)")
+          "$node_dir/npm" install -g npm@11
+          "$node_dir/npm" --version
+          curl -fsS \
+            -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=npm:registry.npmjs.org" \
+            -o "${RUNNER_TEMP}/oidc.json"
+          node -e 'const fs=require("fs"); const body=JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP+"/oidc.json","utf8")).value.split(".")[1]; const claims=JSON.parse(Buffer.from(body,"base64url")); const keys=["aud","sub","ref","environment","repository","workflow_ref","job_workflow_ref","event_name","repository_visibility","workflow"]; const out={}; for (const key of keys) out[key]=claims[key]; console.log(JSON.stringify(out));'
+          rm -f "${RUNNER_TEMP}/oidc.json"
+          "$node_dir/npm" publish --access public --provenance --loglevel verbose
 
   release:
     name: Create the GitHub release
