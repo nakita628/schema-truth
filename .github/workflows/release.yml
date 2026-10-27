@@ -139,9 +139,11 @@ jobs:
 
       - run: vp run schema-truth#build
 
-      # vp has no publish command, so the tarball goes out through pnpm, which attaches
-      # npm provenance from the OIDC token granted above.
-      - run: corepack enable && pnpm -F schema-truth publish --no-git-checks
+      # pnpm exchanges the Actions OIDC token itself and the registry answers 404,
+      # so the publish goes through the npm CLI, which is what trusted publishing accepts.
+      - name: Publish with npm trusted publishing
+        working-directory: packages/schema-truth
+        run: npm publish --access public --provenance
 
   release:
     name: Create the GitHub release
