@@ -139,11 +139,21 @@ jobs:
 
       - run: vp run schema-truth#build
 
-      # pnpm exchanges the Actions OIDC token itself and the registry answers 404,
-      # so the publish goes through the npm CLI, which is what trusted publishing accepts.
+      # Trusted publishing needs npm 11.5.1 or newer. The vite-plus shim can be
+      # older, and an older CLI never exchanges the OIDC token (ENEEDAUTH).
+      # Publish with the npm that sits beside the selected Node, after npm 11.
       - name: Publish with npm trusted publishing
         working-directory: packages/schema-truth
-        run: npm publish --access public --provenance
+        run: |
+          node_bin=$(dirname "$(node -p process.execPath)")
+          "$node_bin/npm" install -g npm@11
+          "$node_bin/npm" --version
+          if [ -n "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ]; then
+            echo "oidc request token is set"
+          else
+            echo "oidc request token is missing"
+          fi
+          "$node_bin/npm" publish --access public --provenance
 
   release:
     name: Create the GitHub release
