@@ -1051,7 +1051,7 @@ describe('valibot', () => {
           'x-prefixItems-message': 'bad tuple',
         }),
       ).toBe(
-        'v.pipe(v.unknown(),v.rawCheck(({dataset,addIssue})=>{if(!dataset.typed)return;const result=v.safeParse(v.tuple([v.string(),v.number()]),dataset.value);if(!result.success){for(const issue of result.issues){if(issue.path&&issue.path.length>0){addIssue({message:"bad tuple",path:issue.path})}else{addIssue(issue)}}}}))',
+        'v.pipe(v.unknown(),v.rawCheck(({dataset,addIssue})=>{if(!dataset.typed)return;const result=v.safeParse(v.tuple([v.string(),v.number()]),dataset.value);if(!result.success){for(const issue of result.issues){if(issue.path&&issue.path.length>0){addIssue({message:"bad tuple",path:issue.path})}else{addIssue({message:issue.message})}}}}),v.tuple([v.string(),v.number()]))',
       )
     })
 
@@ -1067,7 +1067,7 @@ describe('valibot', () => {
       expect(
         valibot({ type: 'array', items: { type: 'string' }, 'x-items-message': 'bad items' }),
       ).toBe(
-        'v.pipe(v.unknown(),v.rawCheck(({dataset,addIssue})=>{if(!dataset.typed)return;const result=v.safeParse(v.array(v.string()),dataset.value);if(!result.success){for(const issue of result.issues){if(issue.path&&issue.path.length>0){addIssue({message:"bad items",path:issue.path})}else{addIssue(issue)}}}}))',
+        'v.pipe(v.unknown(),v.rawCheck(({dataset,addIssue})=>{if(!dataset.typed)return;const result=v.safeParse(v.array(v.string()),dataset.value);if(!result.success){for(const issue of result.issues){if(issue.path&&issue.path.length>0){addIssue({message:"bad items",path:issue.path})}else{addIssue({message:issue.message})}}}}),v.array(v.string()))',
       )
     })
 
@@ -1081,7 +1081,7 @@ describe('valibot', () => {
           'x-items-message': 'bad items',
         }),
       ).toBe(
-        'v.pipe(v.pipe(v.unknown(),v.rawCheck(({dataset,addIssue})=>{if(!dataset.typed)return;const result=v.safeParse(v.array(v.string()),dataset.value);if(!result.success){for(const issue of result.issues){if(issue.path&&issue.path.length>0){addIssue({message:"bad items",path:issue.path})}else{addIssue(issue)}}}})),v.minLength(1),v.maxLength(5))',
+        'v.pipe(v.pipe(v.unknown(),v.rawCheck(({dataset,addIssue})=>{if(!dataset.typed)return;const result=v.safeParse(v.array(v.string()),dataset.value);if(!result.success){for(const issue of result.issues){if(issue.path&&issue.path.length>0){addIssue({message:"bad items",path:issue.path})}else{addIssue({message:issue.message})}}}}),v.array(v.string())),v.minLength(1),v.maxLength(5))',
       )
     })
   })

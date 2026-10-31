@@ -17,6 +17,10 @@ export const Merged = v.pipe(
       }
     }
   }),
+  v.intersect([
+    v.object({ name: v.pipe(v.string(), v.minCodePoints(3)) }),
+    v.object({ age: v.pipe(v.number(), v.integer(), v.minValue(0, 'age must be >= 0')) }),
+  ]),
 )
 
 export type MergedOutput = v.InferOutput<typeof Merged>

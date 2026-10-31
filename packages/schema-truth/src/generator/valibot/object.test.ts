@@ -237,7 +237,7 @@ describe('object', () => {
           false,
         ),
       ).toBe(
-        'v.pipe(v.unknown(),v.rawCheck(({dataset,addIssue})=>{if(!dataset.typed)return;const result=v.safeParse(v.object({a:v.string()}),dataset.value);if(!result.success){for(const issue of result.issues){if(issue.path&&issue.path.length>0){addIssue({message:"bad props",path:issue.path})}else{addIssue(issue)}}}}))',
+        'v.pipe(v.unknown(),v.rawCheck(({dataset,addIssue})=>{if(!dataset.typed)return;const result=v.safeParse(v.object({a:v.string()}),dataset.value);if(!result.success){for(const issue of result.issues){if(issue.path&&issue.path.length>0){addIssue({message:"bad props",path:issue.path})}else{addIssue({message:issue.message})}}}}),v.object({a:v.string()}))',
       )
     })
 
@@ -254,7 +254,7 @@ describe('object', () => {
           false,
         ),
       ).toBe(
-        'v.pipe(v.unknown(),v.rawCheck(({dataset,addIssue})=>{if(!dataset.typed)return;const result=v.safeParse(v.object({a:v.string()}),dataset.value);if(!result.success){for(const issue of result.issues){if(issue.path&&issue.path.length>0){addIssue({message:((issue) => `bad ${issue.path[0].key}`)(issue),path:issue.path})}else{addIssue(issue)}}}}))',
+        'v.pipe(v.unknown(),v.rawCheck(({dataset,addIssue})=>{if(!dataset.typed)return;const result=v.safeParse(v.object({a:v.string()}),dataset.value);if(!result.success){for(const issue of result.issues){if(issue.path&&issue.path.length>0){addIssue({message:((issue) => `bad ${issue.path[0].key}`)(issue),path:issue.path})}else{addIssue({message:issue.message})}}}}),v.object({a:v.string()}))',
       )
     })
   })
