@@ -1,6 +1,6 @@
 import type { JSONSchema } from '../parser/index.js'
 import { coerceDefault, makeSafeKey } from '../utils/index.js'
-import { examplesOf, schemaWithDefaultTarget } from './schema.js'
+import { examplesOf } from './schema.js'
 import type { SchemaDefinitions } from './schema.js'
 
 /**
@@ -52,7 +52,7 @@ export function typeboxDefaultOpt(
   definitions?: SchemaDefinitions,
 ): readonly string[] {
   if (schema.default === undefined) return []
-  const result = coerceDefault(schemaWithDefaultTarget(schema, definitions), schema.default)
+  const result = coerceDefault(schema, schema.default, definitions)
   if (!result.keep) return []
   const value = stringWire ? String(result.value) : result.value
   const formatLiteral =

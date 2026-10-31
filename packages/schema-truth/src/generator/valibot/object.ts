@@ -106,7 +106,9 @@ export function object(
   const required = new Set(schema.required)
   // A property with a default is already `v.optional(..., default)` from its own emitter;
   // wrapped in a second `v.optional()` the default would never be reached.
-  const hasOwnDefault = Object.values(schema.properties).some(isOptionalByDefault)
+  const hasOwnDefault = Object.values(schema.properties).some((propSchema) =>
+    isOptionalByDefault(propSchema, options?.definitions),
+  )
   const props = Object.entries(schema.properties)
     .map(([key, propSchema]) => {
       const parsed = valibot(
@@ -117,7 +119,7 @@ export function object(
       )
       if (!parsed) return null
       const safeKey = makeSafeKey(key)
-      return required.has(key) || isOptionalByDefault(propSchema)
+      return required.has(key) || isOptionalByDefault(propSchema, options?.definitions)
         ? `${safeKey}:${parsed}`
         : `${safeKey}:v.optional(${parsed})`
     })

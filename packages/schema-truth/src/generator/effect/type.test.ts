@@ -208,20 +208,20 @@ describe('effect type', () => {
   })
 
   describe('allOf intersection filtering', () => {
-    it('should exclude null type from intersection', () => {
+    it('should read a null member as null beside the intersection', () => {
       expect(
         type({
           allOf: [{ type: 'object', properties: { name: { type: 'string' } } }, { type: 'null' }],
         }),
-      ).toBe('{readonly name?: string}')
+      ).toBe('({readonly name?: string} | null)')
     })
 
-    it('should exclude nullable: true only', () => {
+    it('should read a nullable: true only member as null beside the intersection', () => {
       expect(
         type({
           allOf: [{ type: 'object', properties: { name: { type: 'string' } } }, { nullable: true }],
         }),
-      ).toBe('{readonly name?: string}')
+      ).toBe('({readonly name?: string} | null)')
     })
 
     it('should exclude default-only object from intersection', () => {

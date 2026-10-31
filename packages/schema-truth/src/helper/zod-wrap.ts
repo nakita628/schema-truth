@@ -4,7 +4,7 @@ import { coerceDefault } from '../utils/index.js'
 import { readCodeExtension } from './code-extensions.js'
 import type { CodeExtensionOptions } from './code-extensions.js'
 import { serializeJSValue } from './meta.js'
-import { examplesOf, schemaWithDefaultTarget } from './schema.js'
+import { examplesOf } from './schema.js'
 import type { SchemaDefinitions } from './schema.js'
 
 /** The options of {@link zodWrap}. */
@@ -38,9 +38,10 @@ export function zodWrap(zodStr: string, schema: JSONSchema, options?: ZodWrapOpt
     }
     return JSON.stringify(value)
   }
-  const described = schemaWithDefaultTarget(schema, options?.definitions)
   const defaultResult =
-    schema.default !== undefined ? coerceDefault(described, schema.default) : undefined
+    schema.default !== undefined
+      ? coerceDefault(schema, schema.default, options?.definitions)
+      : undefined
   // `.nullable()` must precede `.default()` so a `default: null` is valid against
   // the nullable type; for non-null defaults the order is behaviourally identical.
   const withNullable = isNullable(schema) ? `${zodStr}.nullable()` : zodStr

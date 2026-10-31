@@ -1,5 +1,6 @@
 import {
   DEFAULT_ROOT_NAME,
+  DEFINITION_REF_PREFIXES,
   NON_IDENTIFIER_CHARACTER_PATTERN,
   OPENAPI_COMPONENT_SUFFIX_MAP,
 } from '../constants/index.js'
@@ -86,81 +87,226 @@ export function normalizeTypes(t?: string | readonly string[]) {
   return [...t]
 }
 
+/** The keywords of a schema node {@link coerceDefault} reads a `default` against. */
+export type DefaultSchema = {
+  readonly $ref?: string
+  readonly type?: string | readonly string[]
+  readonly nullable?: boolean
+  readonly enum?: readonly unknown[]
+  readonly const?: unknown
+  readonly items?: DefaultSchema | readonly DefaultSchema[] | boolean
+  readonly properties?: { readonly [key: string]: DefaultSchema }
+  readonly required?: readonly string[]
+  readonly additionalProperties?: boolean | object
+  readonly patternProperties?: object
+  readonly unevaluatedProperties?: boolean | object
+  readonly allOf?: readonly DefaultSchema[]
+  readonly oneOf?: readonly DefaultSchema[]
+  readonly anyOf?: readonly DefaultSchema[]
+}
+
+type DefaultResult = { readonly keep: boolean; readonly value: unknown }
+
 /**
  * Reconcile a schema's `default` value with the type the schema actually emits
- * so the generated `.default(...)` stays assignable.
+ * so the generated `.default(...)` stays assignable. The default is kept only
+ * when it is a value of the schema, read the way a document usually writes it:
  *
- * - `null` on a non-nullable schema is unusable as a default → `keep: false`
- *   (the caller omits `.default`).
- * - a string `'true'`/`'false'` on a boolean schema denotes the boolean it
- *   spells → coerced to the boolean value (covers `z.stringbool()` query coercion).
+ * - `null` is kept only on a nullable schema (or one whose `enum` lists it).
+ * - an `enum` / `const` takes only what it lists.
+ * - text that spells a value of the schema's type is read as that value: `'true'`
+ *   for a boolean, `'7'` for a number or an integer; a number or a boolean for a
+ *   string is written as text. Any other scalar of the wrong type is dropped
+ *   (`'null'` for an integer, `'strict'` with the quotes for an enum).
+ * - an array keeps its items when every one is a value of `items`.
  * - an object default drops keys the schema does not declare, when the emitted
  *   object has no index signature (`additionalProperties` is not `true` or a
- *   schema, and there are no `patternProperties`). A loose or record schema
- *   keeps every key.
- * - everything else is returned unchanged (byte-for-byte identical output).
+ *   schema, and there are no `patternProperties`), and needs every `required`
+ *   key. A loose or record schema keeps every key.
+ * - a `$ref`, or an `allOf` the node has no type of its own beside, is read as
+ *   the definition it names when `definitions` has it; a `oneOf` / `anyOf` keeps
+ *   the default when a member takes it, whatever `type` sits beside it.
+ * - a node with nothing to check against (no `type`, an unknown `$ref`) keeps
+ *   the default as written.
  *
- * The mismatch check is deliberately shallow and only crosses the
- * composite (array/object) ↔ scalar category boundary; scalar↔scalar
- * mismatches and schemas without an explicit `type` (`oneOf`/`$ref` only)
- * pass through untouched — JSON Schema 2020-12 §9.9.4.1 treats `default` as
- * an annotation with no validity guarantee, so anything finer would need a
- * full validator.
+ * JSON Schema 2020-12 §9.9.4.1 treats `default` as an annotation with no
+ * validity guarantee, so an invalid one is dropped rather than reported.
  *
  * @example
  * ```ts
- * coerceDefault({ type: 'boolean' }, 'true')           // { keep: true, value: true }
- * coerceDefault({ type: 'object' }, null)              // { keep: false, value: null }
+ * coerceDefault({ type: 'boolean' }, 'true')              // { keep: true, value: true }
+ * coerceDefault({ type: 'number' }, '7')                  // { keep: true, value: 7 }
+ * coerceDefault({ type: 'object' }, null)                 // { keep: false, value: null }
  * coerceDefault({ type: 'object', nullable: true }, null) // { keep: true, value: null }
- * coerceDefault({ type: 'array' }, 'eval')             // { keep: false, value: 'eval' }
+ * coerceDefault({ type: 'array' }, 'eval')                // { keep: false, value: 'eval' }
+ * coerceDefault({ enum: ['a', 'b'] }, "'a'")              // { keep: false, value: "'a'" }
  * ```
  */
 export function coerceDefault(
-  schema: {
-    readonly type?: string | readonly string[]
-    readonly nullable?: boolean
-    readonly properties?: { readonly [key: string]: unknown }
-    readonly additionalProperties?: boolean | object
-    readonly patternProperties?: object
-    readonly unevaluatedProperties?: boolean | object
-  },
+  schema: DefaultSchema,
   value: unknown,
-): { readonly keep: boolean; readonly value: unknown } {
-  const types = Array.isArray(schema.type)
-    ? schema.type
-    : schema.type !== undefined
-      ? [schema.type]
-      : []
-  const isNullable = schema.nullable === true || types.includes('null')
-  if (value === null && !isNullable) return { keep: false, value }
-  if (types.includes('boolean') && (value === 'true' || value === 'false')) {
-    return { keep: true, value: value === 'true' }
-  }
-  // Drop a composite default (`[]` / `{}`) on a purely scalar schema, e.g. the
-  // malformed `{ type: 'string', default: [] }` — keeping it would emit an
-  // ill-typed `.default([])` on a string literal/primitive.
-  const isComposite = Array.isArray(value) || (typeof value === 'object' && value !== null)
-  const allowsComposite = types.length === 0 || types.includes('array') || types.includes('object')
-  if (isComposite && !allowsComposite) return { keep: false, value }
-  // The symmetric hole: drop a scalar default on a composite-only schema, e.g.
-  // OpenAI's malformed `{ type: 'array', default: 'eval' }` — keeping it would
-  // emit an ill-typed `.default('eval')` on an array schema.
-  const allowsScalar =
-    types.length === 0 || types.some((t) => t !== 'array' && t !== 'object' && t !== 'null')
-  if (!isComposite && value !== null && !allowsScalar) return { keep: false, value }
-  if (
-    isDeclaredObject(value) &&
-    schema.properties !== undefined &&
-    !canHoldUndeclaredKeys(schema)
-  ) {
-    const declared = schema.properties
-    const kept: { [key: string]: unknown } = {}
-    for (const [key, item] of Object.entries(value)) {
-      if (Object.hasOwn(declared, key)) kept[key] = item
+  definitions?: { readonly [name: string]: DefaultSchema },
+): DefaultResult {
+  return conformDefault(schema, value, definitions, new Set())
+}
+
+function conformDefault(
+  schema: DefaultSchema,
+  value: unknown,
+  definitions: { readonly [name: string]: DefaultSchema } | undefined,
+  // The references already being read: a cycle ends at the reference, as written.
+  reading: ReadonlySet<string>,
+): DefaultResult {
+  const drop: DefaultResult = { keep: false, value }
+  const asIs: DefaultResult = { keep: true, value }
+  const conform = (s: DefaultSchema, v: unknown, r: ReadonlySet<string> = reading) =>
+    conformDefault(s, v, definitions, r)
+  if (schema.$ref !== undefined) {
+    const target = reading.has(schema.$ref) ? undefined : definitionOf(schema.$ref, definitions)
+    if (target === undefined) {
+      return value === null && schema.nullable !== true ? drop : asIs
     }
-    return { keep: true, value: kept }
+    const { $ref, ...beside } = schema
+    return conform({ ...target, ...beside }, value, new Set([...reading, $ref]))
   }
-  return { keep: true, value }
+  const types = normalizeTypes(schema.type)
+  const isNullable =
+    schema.nullable === true ||
+    types.includes('null') ||
+    schema.enum?.includes(null) === true ||
+    schema.const === null
+  if (value === null) {
+    if (isNullable) return asIs
+    const members = [...(schema.oneOf ?? []), ...(schema.anyOf ?? [])]
+    return members.some((member) => conform(member, null).keep) ? asIs : drop
+  }
+  // A union is emitted from its members, not from a `type` beside it.
+  const members = schema.oneOf ?? schema.anyOf
+  if (members !== undefined && members.length > 0) {
+    const results = members.map((member) => conform(member, value))
+    return (
+      results.find((result) => result.keep && result.value === value) ??
+      results.find((result) => result.keep) ??
+      drop
+    )
+  }
+  if (schema.enum !== undefined) {
+    return schema.enum.some((member) => member === value) ? asIs : drop
+  }
+  if (schema.const !== undefined) {
+    return JSON.stringify(schema.const) === JSON.stringify(value) ? asIs : drop
+  }
+  if (types.length === 0 && schema.allOf !== undefined) {
+    // A `{ type: 'null' }` member only makes the node nullable, read above.
+    const shaped = schema.allOf.filter((member) => {
+      const memberTypes = normalizeTypes(member.type)
+      return memberTypes.length === 0 || memberTypes.some((t) => t !== 'null')
+    })
+    return shaped.reduce<DefaultResult>(
+      (result, member) => (result.keep ? conform(member, result.value) : result),
+      asIs,
+    )
+  }
+  const valueTypes = types.filter((t) => t !== 'null')
+  // `type: 'null'` takes nothing but the `null` read above.
+  if (types.length > 0 && valueTypes.length === 0) return drop
+  if (valueTypes.length === 0) {
+    return schema.properties !== undefined ? (readObject(schema, value, conform) ?? drop) : asIs
+  }
+  const read = (type: string): DefaultResult | undefined => {
+    if (type === 'boolean') {
+      if (typeof value === 'boolean') return asIs
+      if (value === 'true' || value === 'false') return { keep: true, value: value === 'true' }
+      return undefined
+    }
+    if (type === 'number' || type === 'integer') {
+      const number =
+        typeof value === 'number'
+          ? value
+          : typeof value === 'string' && value.trim() !== '' && Number.isFinite(Number(value))
+            ? Number(value)
+            : undefined
+      if (number === undefined) return undefined
+      if (type === 'integer' && !Number.isInteger(number)) return undefined
+      return { keep: true, value: number }
+    }
+    if (type === 'string') {
+      if (typeof value === 'string') return asIs
+      if (typeof value === 'number' || typeof value === 'boolean') {
+        return { keep: true, value: String(value) }
+      }
+      return undefined
+    }
+    if (type === 'array') {
+      if (!Array.isArray(value)) return undefined
+      const items = schema.items
+      if (items === undefined || typeof items === 'boolean' || Array.isArray(items)) return asIs
+      const itemSchema = items as DefaultSchema
+      const readItems = value.map((item) => conform(itemSchema, item))
+      return readItems.every((item) => item.keep)
+        ? { keep: true, value: readItems.map((item) => item.value) }
+        : undefined
+    }
+    if (type === 'object') return readObject(schema, value, conform)
+    // `date`, or a type the generators do not know: taken as written.
+    return asIs
+  }
+  // The type the value already is comes first, so `['string', 'boolean']` keeps `'true'`.
+  const own = valueTypes.find(
+    (type) => typeOf(value) === type || (type === 'number' && typeof value === 'number'),
+  )
+  return (
+    (own === undefined ? undefined : read(own)) ??
+    valueTypes.map(read).find((r) => r !== undefined) ??
+    drop
+  )
+}
+
+/** An object default as a value of the schema, or `undefined` when it is not one. */
+function readObject(
+  schema: DefaultSchema,
+  value: unknown,
+  conform: (schema: DefaultSchema, value: unknown) => DefaultResult,
+): DefaultResult | undefined {
+  if (!isDeclaredObject(value)) return undefined
+  if (schema.properties === undefined || canHoldUndeclaredKeys(schema)) {
+    return { keep: true, value }
+  }
+  const declared = schema.properties
+  if ((schema.required ?? []).some((key) => !Object.hasOwn(value, key))) return undefined
+  const kept: { [key: string]: unknown } = {}
+  for (const [key, item] of Object.entries(value)) {
+    if (!Object.hasOwn(declared, key)) continue
+    const result = conform(declared[key], item)
+    if (!result.keep) return undefined
+    kept[key] = result.value
+  }
+  return { keep: true, value: kept }
+}
+
+/** The definition a local `$ref` names, when `definitions` has it. */
+function definitionOf(
+  ref: string,
+  definitions: { readonly [name: string]: DefaultSchema } | undefined,
+): DefaultSchema | undefined {
+  if (definitions === undefined) return undefined
+  for (const prefix of DEFINITION_REF_PREFIXES) {
+    if (!ref.startsWith(prefix)) continue
+    const rest = ref.slice(prefix.length)
+    if (rest === '' || rest.includes('/')) return undefined
+    const name = decodeURIComponent(rest)
+    return Object.hasOwn(definitions, name) ? definitions[name] : undefined
+  }
+  return undefined
+}
+
+function typeOf(value: unknown): string | undefined {
+  if (typeof value === 'boolean') return 'boolean'
+  if (typeof value === 'number') return Number.isInteger(value) ? 'integer' : 'number'
+  if (typeof value === 'string') return 'string'
+  if (Array.isArray(value)) return 'array'
+  if (isDeclaredObject(value)) return 'object'
+  return undefined
 }
 
 function isDeclaredObject(value: unknown): value is { readonly [key: string]: unknown } {
