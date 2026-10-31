@@ -99,10 +99,16 @@ export function object(
         })
       : []
 
-  // ── additionalProperties: schema → type({"[string]": ...}) + propertyNames + patternProperties ──
-  if (typeof schema.additionalProperties === 'object') {
+  // ── additionalProperties: schema → type({"[string]": ...}) + propertyNames ──
+  // With `properties` or patterns beside it, `additionalProperties` covers only the keys
+  // they leave, handled with them below.
+  if (
+    typeof schema.additionalProperties === 'object' &&
+    schema.properties === undefined &&
+    schema.patternProperties === undefined
+  ) {
     const innerLiteral = `{"[string]":${arktype(schema.additionalProperties, rootName, isArktype, options)}}`
-    const narrows = [propertyNamesNarrow(), ...patternPropertiesNarrows()].filter((a) => a !== '')
+    const narrows = [propertyNamesNarrow()].filter((a) => a !== '')
     if (narrows.length > 0) return composeNarrows(innerLiteral, narrows, isArktype)
     return isArktype ? innerLiteral : `type(${innerLiteral})`
   }
@@ -193,19 +199,23 @@ export function object(
       ? narrowPredicate(`Object.keys(data).every((key) => ${isEvaluated})`, addlPropsMessage)
       : ''
   const unevaluatedPropertiesNarrow = (() => {
-    const u = schema.unevaluatedProperties
+    // `additionalProperties` as a schema holds the keys no property or pattern covers, as
+    // `unevaluatedProperties` does here.
+    const u =
+      typeof schema.additionalProperties === 'object'
+        ? schema.additionalProperties
+        : schema.unevaluatedProperties
     if (u === undefined || u === true) return ''
+    const message =
+      typeof schema.additionalProperties === 'object' ? addlPropsMessage : unevalPropsRawMessage
     if (u === false) {
-      return narrowPredicate(
-        `Object.keys(data).every((key) => ${isEvaluated})`,
-        unevalPropsRawMessage,
-      )
+      return narrowPredicate(`Object.keys(data).every((key) => ${isEvaluated})`, message)
     }
     if (typeof u === 'object') {
       const s = callbackType(arktype(u, rootName, isArktype, options), isArktype)
       return narrowPredicate(
         `Object.entries(data).every(([key, value]) => ${isEvaluated} || ${s}.allows(value))`,
-        unevalPropsRawMessage,
+        message,
       )
     }
     return ''

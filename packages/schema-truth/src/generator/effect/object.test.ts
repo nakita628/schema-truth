@@ -159,7 +159,7 @@ describe('object', () => {
           false,
         ),
       ).toBe(
-        'Schema.Record(Schema.String,Schema.String).check(Schema.makeFilter((input)=>Object.entries(input).every(([key,value])=>!new RegExp("^id_").test(key)||Schema.is(Schema.toEncoded(Schema.Number))(value))))',
+        'Schema.StructWithRest(Schema.Struct({}),[Schema.Record(Schema.String,Schema.Unknown)]).check(Schema.makeFilter((input)=>Object.entries(input).every(([key,value])=>!new RegExp("^id_").test(key)||Schema.is(Schema.toEncoded(Schema.Number))(value))),Schema.makeFilter((input)=>Object.entries(input).every(([key,value])=>[].includes(key)||new RegExp("^id_").test(key)||Schema.is(Schema.toEncoded(Schema.String))(value))))',
       )
     })
   })

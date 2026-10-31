@@ -55,25 +55,23 @@ export function object(
   // reduces to `additionalProperties`. The message rides through the
   // strictObject `unrecognized_keys` error param (see `strictMessage` below).
 
-  // ── additionalProperties: schema → z.record(...) + propertyNames + patternProperties ──
+  // ── additionalProperties: schema → z.record(...) + propertyNames ──
   // NOTE: `.readonly()` is appended by the dispatcher (`zod.ts:readonly`),
   // so this function does NOT add `.readonly()` itself.
-  if (typeof schema.additionalProperties === 'object') {
+  // With `properties` or patterns beside it, `additionalProperties` covers only the keys
+  // they leave, handled with them below.
+  if (
+    typeof schema.additionalProperties === 'object' &&
+    schema.properties === undefined &&
+    schema.patternProperties === undefined
+  ) {
     const record = `z.record(z.string(),${zod(schema.additionalProperties, rootName, isZod, options)})`
     const recordPropNames = schema.propertyNames?.pattern
       ? `.refine((val)=>Object.keys(val).every((key)=>new RegExp(${JSON.stringify(schema.propertyNames.pattern)}).test(key))${propNamesErrorArg})`
       : schema.propertyNames?.enum
         ? `.refine((val)=>Object.keys(val).every((key)=>${JSON.stringify(schema.propertyNames.enum)}.includes(key))${propNamesErrorArg})`
         : ''
-    const recordPatternProps = schema.patternProperties
-      ? Object.entries(schema.patternProperties)
-          .map(([pattern, propSchema]) => {
-            const z = zod(propSchema, rootName, isZod, options)
-            return `.refine((val)=>Object.entries(val).every(([key,value])=>!new RegExp(${JSON.stringify(pattern)}).test(key)||${z}.safeParse(value).success)${patternErrorArg})`
-          })
-          .join('')
-      : ''
-    return `${record}${recordPropNames}${recordPatternProps}`
+    return `${record}${recordPropNames}`
   }
 
   const properties = schema.properties ?? {}
@@ -86,13 +84,23 @@ export function object(
   // A key outside `properties` is still allowed when a pattern or a schema covers it, so the
   // object cannot simply reject undeclared keys.
   const closedByCheck = closed && schema.patternProperties !== undefined
-  const unevaluatedSchema = typeof unevaluated === 'object' ? unevaluated : undefined
+  // The schema a key no property names and no pattern matches is held to.
+  const extraSchema =
+    typeof schema.additionalProperties === 'object'
+      ? schema.additionalProperties
+      : typeof unevaluated === 'object'
+        ? unevaluated
+        : undefined
+  const extraMessage =
+    typeof schema.additionalProperties === 'object'
+      ? schema['x-additionalProperties-message']
+      : schema['x-unevaluatedProperties-message']
   if (!schema.properties) {
     if (schema.additionalProperties === true) return 'z.any()'
     const checksKeys =
       undeclaredRequired.length > 0 ||
       schema.patternProperties !== undefined ||
-      unevaluatedSchema !== undefined ||
+      extraSchema !== undefined ||
       closed
     if (!checksKeys) return 'z.object({})'
   }
@@ -108,7 +116,7 @@ export function object(
     schema.dependentRequired !== undefined ||
     schema.dependentSchemas !== undefined ||
     undeclaredRequired.length > 0 ||
-    unevaluatedSchema !== undefined ||
+    extraSchema !== undefined ||
     closedByCheck
   const objectType =
     schema.additionalProperties === true
@@ -225,8 +233,8 @@ export function object(
   )
   const unevaluatedKeys = closedByCheck
     ? `.refine((val)=>Object.keys(val).every((key)=>${isEvaluated})${zodErrorPart(strictMessage ?? errorMessage)})`
-    : unevaluatedSchema !== undefined
-      ? `.refine((val)=>Object.entries(val).every(([key,value])=>${isEvaluated}||${zod(unevaluatedSchema, rootName, isZod, options)}.safeParse(value).success)${zodErrorPart(schema['x-unevaluatedProperties-message'] ?? errorMessage)})`
+    : extraSchema !== undefined
+      ? `.refine((val)=>Object.entries(val).every(([key,value])=>${isEvaluated}||${zod(extraSchema, rootName, isZod, options)}.safeParse(value).success)${zodErrorPart(extraMessage ?? errorMessage)})`
       : ''
   const objectExpr = `${partialBase}${minProperties}${maxProperties}${propertyNames}${patternProperties}${requiredPresent}${unevaluatedKeys}${dependentRequired}${dependentSchemas}${ifThenElse}`
   const hasInheritedName = Object.keys(properties).some(isObjectPrototypeProperty)

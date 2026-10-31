@@ -82,10 +82,16 @@ export function object(
         })
       : []
 
-  // ── additionalProperties: schema → v.record(...) + propertyNames + patternProperties ──
-  if (typeof schema.additionalProperties === 'object') {
+  // ── additionalProperties: schema → v.record(...) + propertyNames ──
+  // With `properties` or patterns beside it, `additionalProperties` covers only the keys
+  // they leave, handled with them below.
+  if (
+    typeof schema.additionalProperties === 'object' &&
+    schema.properties === undefined &&
+    schema.patternProperties === undefined
+  ) {
     const record = `v.record(v.string(),${valibot(schema.additionalProperties, rootName, isValibot, options)})`
-    const actions = [propertyNamesCheck(), ...patternPropertiesChecks()].filter((a) => a !== '')
+    const actions = [propertyNamesCheck()].filter((a) => a !== '')
     return actions.length > 0 ? `v.pipe(${record},${actions.join(',')})` : record
   }
 
@@ -99,8 +105,18 @@ export function object(
   // A key outside `properties` is still allowed when a pattern or a schema covers it, so the
   // object cannot simply reject undeclared keys.
   const closedByCheck = closed && schema.patternProperties !== undefined
-  const unevaluatedSchema = typeof unevaluated === 'object' ? unevaluated : undefined
-  const checksKeys = undeclaredRequired.length > 0 || unevaluatedSchema !== undefined || closed
+  // The schema a key no property names and no pattern matches is held to.
+  const extraSchema =
+    typeof schema.additionalProperties === 'object'
+      ? schema.additionalProperties
+      : typeof unevaluated === 'object'
+        ? unevaluated
+        : undefined
+  const extraMessage =
+    typeof schema.additionalProperties === 'object'
+      ? schema['x-additionalProperties-message']
+      : schema['x-unevaluatedProperties-message']
+  const checksKeys = undeclaredRequired.length > 0 || extraSchema !== undefined || closed
   if (!schema.properties && !checksKeys) {
     if (schema.patternProperties) {
       const record = `v.record(v.string(),v.unknown())`
@@ -122,7 +138,7 @@ export function object(
     schema.dependentRequired !== undefined ||
     schema.dependentSchemas !== undefined ||
     undeclaredRequired.length > 0 ||
-    unevaluatedSchema !== undefined ||
+    extraSchema !== undefined ||
     closedByCheck
   const objectKind =
     schema.additionalProperties === true
@@ -233,8 +249,8 @@ export function object(
   )
   const unevaluatedKeysCheck = closedByCheck
     ? `v.check((input)=>Object.keys(input).every((key)=>${isEvaluated})${valibotErrorPart(strictExtrasMessage ?? errorMessage)})`
-    : unevaluatedSchema !== undefined
-      ? `v.check((input)=>Object.entries(input).every(([key,value])=>${isEvaluated}||v.safeParse(${valibot(unevaluatedSchema, rootName, isValibot, options)},value).success)${valibotErrorPart(schema['x-unevaluatedProperties-message'] ?? errorMessage)})`
+    : extraSchema !== undefined
+      ? `v.check((input)=>Object.entries(input).every(([key,value])=>${isEvaluated}||v.safeParse(${valibot(extraSchema, rootName, isValibot, options)},value).success)${valibotErrorPart(extraMessage ?? errorMessage)})`
       : ''
   const actions = [
     minPropertiesCheck,

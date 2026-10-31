@@ -72,10 +72,16 @@ export function object(
         })
       : []
 
-  // ── additionalProperties: schema → Schema.Record(...) + propertyNames + patternProperties ──
-  if (typeof schema.additionalProperties === 'object') {
+  // ── additionalProperties: schema → Schema.Record(...) + propertyNames ──
+  // With `properties` or patterns beside it, `additionalProperties` covers only the keys
+  // they leave, handled with them below.
+  if (
+    typeof schema.additionalProperties === 'object' &&
+    schema.properties === undefined &&
+    schema.patternProperties === undefined
+  ) {
     const record = `Schema.Record(Schema.String,${effect(schema.additionalProperties, rootName, isEffect, options)})`
-    const checks = [propertyNamesFilter(), ...patternPropertiesFilters()].filter((a) => a !== '')
+    const checks = [propertyNamesFilter()].filter((a) => a !== '')
     return checks.length > 0 ? `${record}.check(${checks.join(',')})` : record
   }
 
@@ -86,8 +92,18 @@ export function object(
   )
   const unevaluated = schema.unevaluatedProperties
   const closed = schema.additionalProperties === false || unevaluated === false
-  const unevaluatedSchema = typeof unevaluated === 'object' ? unevaluated : undefined
-  const checksKeys = undeclaredRequired.length > 0 || unevaluatedSchema !== undefined || closed
+  // The schema a key no property names and no pattern matches is held to.
+  const extraSchema =
+    typeof schema.additionalProperties === 'object'
+      ? schema.additionalProperties
+      : typeof unevaluated === 'object'
+        ? unevaluated
+        : undefined
+  const extraMessage =
+    typeof schema.additionalProperties === 'object'
+      ? schema['x-additionalProperties-message']
+      : schema['x-unevaluatedProperties-message']
+  const checksKeys = undeclaredRequired.length > 0 || extraSchema !== undefined || closed
   if (!schema.properties && !checksKeys) {
     // v3.2: patternProperties without properties → unknown-typed Record + filter.
     if (schema.patternProperties) {
@@ -174,8 +190,8 @@ export function object(
   )
   const unevaluatedKeysFilter = closed
     ? `Schema.makeFilter((input)=>Object.keys(input).every((key)=>${isEvaluated})${effectErrorPart(strictExtrasMessage ?? errorMessage)})`
-    : unevaluatedSchema !== undefined
-      ? `Schema.makeFilter((input)=>Object.entries(input).every(([key,value])=>${isEvaluated}||Schema.is(Schema.toEncoded(${effect(unevaluatedSchema, rootName, isEffect, options)}))(value))${effectErrorPart(schema['x-unevaluatedProperties-message'] ?? errorMessage)})`
+    : extraSchema !== undefined
+      ? `Schema.makeFilter((input)=>Object.entries(input).every(([key,value])=>${isEvaluated}||Schema.is(Schema.toEncoded(${effect(extraSchema, rootName, isEffect, options)}))(value))${effectErrorPart(extraMessage ?? errorMessage)})`
       : ''
 
   // v3.2: if/then/else conditional schema. Routed through a filter: when `if`

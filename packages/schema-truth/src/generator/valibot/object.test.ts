@@ -175,7 +175,7 @@ describe('object', () => {
           false,
         ),
       ).toBe(
-        'v.pipe(v.record(v.string(),v.string()),v.check((input)=>Object.entries(input).every(([key,value])=>!new RegExp("^id_").test(key)||v.safeParse(v.number(),value).success)))',
+        'v.pipe(v.partial(v.looseObject({})),v.check((input)=>Object.entries(input).every(([key,value])=>!new RegExp("^id_").test(key)||v.safeParse(v.number(),value).success)),v.check((input)=>Object.entries(input).every(([key,value])=>[].includes(key)||new RegExp("^id_").test(key)||v.safeParse(v.string(),value).success)))',
       )
     })
   })

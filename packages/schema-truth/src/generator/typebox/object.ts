@@ -31,7 +31,13 @@ export function object(
   if (hasCombinator(schema)) return typebox(schema, rootName, isTypebox, options)
 
   // ── additionalProperties: schema → Type.Record(...) ──
-  if (typeof schema.additionalProperties === 'object') {
+  // With `properties` or patterns beside it, `additionalProperties` covers only the keys
+  // they leave: an option of the object below, which TypeBox evaluates itself.
+  if (
+    typeof schema.additionalProperties === 'object' &&
+    schema.properties === undefined &&
+    schema.patternProperties === undefined
+  ) {
     const value = typebox(schema.additionalProperties, rootName, isTypebox, childOptions)
     const recordOpts = [
       ...typeboxRefOpt(options?.ref),
@@ -55,6 +61,11 @@ export function object(
     }
     const emptyOpts = [
       ...typeboxRefOpt(options?.ref),
+      schema.additionalProperties === false
+        ? 'additionalProperties:false'
+        : typeof schema.additionalProperties === 'object'
+          ? `additionalProperties:${typebox(schema.additionalProperties, rootName, isTypebox, childOptions)}`
+          : undefined,
       ...buildAdvancedOpts(schema, rootName, isTypebox, childOptions),
       ...typeboxMetaOpts(schema),
       ...typeboxDefaultOpt(schema),
@@ -151,7 +162,11 @@ export function object(
       : undefined
   const optParts = [
     ...typeboxRefOpt(options?.ref),
-    schema.additionalProperties === false ? 'additionalProperties:false' : undefined,
+    schema.additionalProperties === false
+      ? 'additionalProperties:false'
+      : typeof schema.additionalProperties === 'object'
+        ? `additionalProperties:${typebox(schema.additionalProperties, rootName, isTypebox, childOptions)}`
+        : undefined,
     ...buildAdvancedOpts(schema, rootName, isTypebox, childOptions),
     objectErrorMessageField,
     ...typeboxMetaOpts(schema),
