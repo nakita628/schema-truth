@@ -1,5 +1,6 @@
 import { UNSAFE_GENERATED_MARKER } from '../../constants/index.js'
 import {
+  definitionsOf,
   emitOptionsOf,
   findCodeExtensionKeysInSchema,
   hoistNestedRefs,
@@ -24,12 +25,14 @@ export function schemaToArktype(input: JSONSchema, options?: GenerateOptions): s
   // and its subtypes do not refer to each other in a loop.
   const schema = withPolymorphicBases(hoistNestedRefs(input))
   const exportType = options?.exportType ?? true
-  const emitOptions = emitOptionsOf(options)
+  const baseOptions = emitOptionsOf(options)
   const codeExtensionsPresent =
-    emitOptions.unsafeCodeExtensions === true && findCodeExtensionKeysInSchema(schema).length > 0
+    baseOptions.unsafeCodeExtensions === true && findCodeExtensionKeysInSchema(schema).length > 0
   const prefix = codeExtensionsPresent ? [UNSAFE_GENERATED_MARKER] : []
-  const toName = schemaNamer(emitOptions.openapi)
+  const toName = schemaNamer(baseOptions.openapi)
   const plan = planDocument(schema, rootNameOf(schema, toName))
+  const definitions = definitionsOf(baseOptions, plan.definitions)
+  const emitOptions = definitions === undefined ? baseOptions : { ...baseOptions, definitions }
   const { rootName } = plan
 
   if (plan.hasDefinitions) {

@@ -41,6 +41,7 @@ import {
   wireNullText,
   wireNumericKind,
   withoutParameterSerialization,
+  evaluatedProperties,
 } from '../../helper/index.js'
 import type { ArktypeWrapOptions } from '../../helper/index.js'
 import type { EmitOptions } from '../../options/index.js'
@@ -137,6 +138,35 @@ function isNumericMember(schema: JSONSchema): boolean {
     !isInt64(schema) &&
     schema.format !== 'bigint'
   )
+}
+
+/**
+ * An `allOf` with `unevaluatedProperties` beside it: one more member whose regex index
+ * signature matches every key no member evaluates (no listed name, no pattern matching
+ * anywhere in it) and holds it to `unevaluatedProperties`. An index signature can name a
+ * scope alias, which a `.narrow()` callback cannot. `undefined` when the keyword is absent
+ * or every key is evaluated.
+ */
+function unevaluatedPropertiesMember(
+  schema: JSONSchema,
+  rootName: string,
+  isArktype: boolean,
+  options: EmitOptions | undefined,
+): string | undefined {
+  const unevaluated = schema.unevaluatedProperties
+  if (unevaluated !== false && (typeof unevaluated !== 'object' || unevaluated === null)) {
+    return undefined
+  }
+  const evaluated = evaluatedProperties(schema, options?.definitions)
+  if (evaluated === undefined) return undefined
+  const value =
+    unevaluated === false ? '"never"' : arktype(unevaluated, rootName, isArktype, options)
+  const names = evaluated.names.map((name) => name.replaceAll(/[\\^$.*+?()[\]{}|/]/gu, '\\$&'))
+  const lookaheads = [
+    ...(names.length === 0 ? [] : [`(?!(?:${names.join('|')})$)`]),
+    ...evaluated.patterns.map((pattern) => `(?![\\s\\S]*?(?:${pattern.replaceAll('/', '\\/')}))`),
+  ]
+  return `{${JSON.stringify(`[/^${lookaheads.join('')}/]`)}:${value}}`
 }
 
 /**
@@ -292,7 +322,10 @@ function node(
       isKeywordOnlyMember(s) ? keywordConstraint(s) : arktype(s, rootName, isArktype, options),
     )
     if (schemas.length === 0) return arktypeWrap('"unknown"', { ...schema, nullable })
-    const baseResult = schemas.length === 1 ? schemas[0] : intersectionStr(schemas, isArktype)
+    const unevaluated = unevaluatedPropertiesMember(schema, rootName, isArktype, options)
+    const intersected = unevaluated === undefined ? schemas : [...schemas, unevaluated]
+    const baseResult =
+      intersected.length === 1 ? intersected[0] : intersectionStr(intersected, isArktype)
     return arktypeWrap(baseResult, { ...schema, nullable })
   }
 
