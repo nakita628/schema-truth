@@ -750,7 +750,7 @@ describe('typebox', () => {
           properties: { ref_def: { $ref: '#/components/schemas/Count', default: 3 } },
         },
         undefined,
-        'Type.Object({ref_def:Type.Optional(Count)})',
+        'Type.Object({ref_def:Type.Optional(Type.Intersect([Count],{default:3}))})',
       ],
       [
         { $ref: '#/components/schemas/Count', nullable: true },

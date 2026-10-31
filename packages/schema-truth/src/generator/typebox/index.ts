@@ -2,6 +2,8 @@ import { NOT_KEYWORD_UNSUPPORTED_MARKER } from '../../constants/index.js'
 import { isRootRef } from '../../guard/index.js'
 import {
   cyclicDefinitionNames,
+  definitionsOf,
+  emitOptionsOf,
   hasNotKeyword,
   hasRootSelfReference,
   hoistNestedRefs,
@@ -47,16 +49,18 @@ export function schemaToTypebox(input: JSONSchema, options?: TypeboxGenerateOpti
   const exportType = options?.exportType ?? true
   const openapi = options?.openapi ?? false
   const hostRef = options?.ref
+  const toName = schemaNamer(openapi)
+  const plan = planDocument(schema, rootNameOf(schema, toName))
+  const { rootName } = plan
+  const definitions = definitionsOf(emitOptionsOf(options), plan.definitions)
   const genOptions: TypeboxOptions = {
     openapi,
     readonly: options?.readonly ?? false,
     ...(options?.paramIn !== undefined && { paramIn: options.paramIn }),
+    ...(definitions !== undefined && { definitions }),
   }
   const rootOptions = hostRef === undefined ? genOptions : { ...genOptions, ref: hostRef }
   const notKeywordPresent = hasNotKeyword(schema)
-  const toName = schemaNamer(openapi)
-  const plan = planDocument(schema, rootNameOf(schema, toName))
-  const { rootName } = plan
 
   // A `$ref` cycle cannot be expressed with plain `const` declarations: the
   // first one would reference a peer declared later. TypeBox v1 answers this

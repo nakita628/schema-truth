@@ -70,7 +70,7 @@ export function object(
       const safeKey = makeSafeKey(key)
       // A property with a default is already `Type.Optional` from its own emitter, so it
       // is not wrapped a second time.
-      return required.has(key) || isOptionalByDefault(propSchema)
+      return required.has(key) || isOptionalByDefault(propSchema, options?.definitions)
         ? `${safeKey}:${parsed}`
         : `${safeKey}:Type.Optional(${parsed})`
     })

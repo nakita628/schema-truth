@@ -21,6 +21,7 @@ import {
   stringboolTruthyPattern,
   typeboxWrap,
 } from '../../helper/index.js'
+import type { SchemaDefinitions } from '../../helper/index.js'
 import { typeboxDefaultOpt, typeboxMetaOpts, typeboxRefOpt } from '../../helper/meta.js'
 import type { JSONSchema, ParamIn } from '../../parser/index.js'
 import { normalizeTypes, resolveOpenAPIRef } from '../../utils/index.js'
@@ -48,6 +49,8 @@ export type TypeboxOptions = {
   readonly paramIn?: ParamIn
   readonly cyclicRefs?: ReadonlySet<string>
   readonly ref?: string
+  /** Definitions a `default` beside a `$ref` is checked against. */
+  readonly definitions?: SchemaDefinitions
 }
 
 /**
@@ -61,6 +64,7 @@ export function nestedTypeboxOptions(options?: TypeboxOptions): TypeboxOptions |
     ...(options.readonly !== undefined && { readonly: options.readonly }),
     ...(options.paramIn !== undefined && { paramIn: options.paramIn }),
     ...(options.cyclicRefs !== undefined && { cyclicRefs: options.cyclicRefs }),
+    ...(options.definitions !== undefined && { definitions: options.definitions }),
   }
 }
 
@@ -149,6 +153,7 @@ export function typebox(
   const readonly = (v: string) => (options?.readonly ? `Type.Readonly(${v})` : v)
   const hostRef = options?.ref
   const childOptions = nestedTypeboxOptions(options)
+  const definitions = options?.definitions
 
   // A name emitted inside `Type.Cyclic($defs, root)` can only be reached by
   // name — the peer `const` it would otherwise reference may be declared later
@@ -184,11 +189,20 @@ export function typebox(
       }
       return 'Type.Any()'
     }
+    // A `default` beside a `$ref` rides on a one-member intersection: the referenced
+    // schema is shared, so its own options cannot carry it.
+    const withDefault = (s: JSONSchema): string => {
+      const defaultOpt = typeboxDefaultOpt(s, false, definitions)
+      const named = ref(s)
+      const inner =
+        defaultOpt.length === 0 ? named : `Type.Intersect([${named}],{${defaultOpt.join(',')}})`
+      return typeboxWrap(inner, s, definitions)
+    }
     const items = itemsSchemaOf(schema.items)
     if (schema.type === 'array' && items?.$ref) {
-      return `Type.Array(${typeboxWrap(ref(items), items)})`
+      return `Type.Array(${withDefault(items)})`
     }
-    return typeboxWrap(ref(schema), schema)
+    return withDefault(schema)
   }
 
   if (schema.oneOf) {
@@ -243,34 +257,29 @@ export function typebox(
         : typeof unevaluated === 'object' && unevaluated !== null
           ? [`unevaluatedProperties:${typebox(unevaluated, rootName, isTypebox, childOptions)}`]
           : []
+    // A `default` beside `allOf`, or in a default-only member, is checked against the
+    // members and carried on the `Type.Intersect` (a one-member intersection is the
+    // member itself): TypeBox v1's `Type.Optional` takes no default of its own.
+    const { default: ownDefault, ...withoutDefault } = schema
+    const withMergedDefault: JSONSchema = {
+      ...withoutDefault,
+      nullable,
+      ...(defaultValue !== undefined
+        ? { default: defaultValue }
+        : ownDefault !== undefined && { default: ownDefault }),
+    }
+    const defaultOpt = typeboxDefaultOpt(withMergedDefault, false, definitions)
     const baseResult =
-      schemas.length === 1 && unevaluatedOpt.length === 0
+      schemas.length === 1 && unevaluatedOpt.length === 0 && defaultOpt.length === 0
         ? schemas[0]
         : tbComp(
             'Type.Intersect',
             `[${schemas.join(',')}]`,
-            schema,
-            [...messageOpt(schema['x-allOf-message']), ...unevaluatedOpt],
+            withoutDefault,
+            [...messageOpt(schema['x-allOf-message']), ...unevaluatedOpt, ...defaultOpt],
             hostRef,
           )
-    if (defaultValue !== undefined) {
-      const formatLiteral =
-        typeof defaultValue === 'boolean' || typeof defaultValue === 'number'
-          ? `${defaultValue}`
-          : JSON.stringify(defaultValue)
-      // TypeBox v1's `Type.Optional` takes one arg, so the default must live in an
-      // inner type's options. Carry it on the `Type.Intersect` wrapper (a single
-      // member intersect is the identity, so this is valid for both arities).
-      const intersectOpts = [
-        ...typeboxRefOpt(hostRef),
-        ...messageOpt(schema['x-allOf-message']),
-        `default:${formatLiteral}`,
-      ]
-      const baseWithDefault = `Type.Intersect([${schemas.join(',')}],{${intersectOpts.join(',')}})`
-      const withDefault = `Type.Optional(${baseWithDefault})`
-      return nullable ? `Type.Union([${withDefault},Type.Null()])` : withDefault
-    }
-    return typeboxWrap(baseResult, { ...schema, nullable })
+    return typeboxWrap(baseResult, withMergedDefault, definitions)
   }
 
   if (schema.not) {
