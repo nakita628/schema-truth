@@ -26,7 +26,7 @@ function resolvePointer(document: unknown, ref: string): unknown {
   let node = document
   for (const token of ref.slice(2).split('/').map(decodeToken)) {
     if (typeof node !== 'object' || node === null || !Object.hasOwn(node, token)) return undefined
-    node = (node as { readonly [key: string]: unknown })[token]
+    node = Reflect.get(node, token)
   }
   return node
 }
@@ -41,6 +41,11 @@ function collectNestedPointers(node: unknown, found: Set<string>): void {
     if (key === '$ref' && typeof value === 'string' && isNestedPointer(value)) found.add(value)
     else if (!DATA_KEYWORDS.has(key)) collectNestedPointers(value, found)
   }
+}
+
+/** A JSON object read as a schema node: what a pointer reaches or a rewrite returns. */
+function isSchemaNode(value: unknown): value is JSONSchema {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function rewriteRefs(node: unknown, refs: ReadonlyMap<string, string>): unknown {
@@ -77,23 +82,24 @@ export function hoistNestedRefs(schema: JSONSchema): JSONSchema {
     ...Object.keys(schema.definitions ?? {}),
   ])
   const refs = new Map<string, string>()
-  const hoisted: { [name: string]: unknown } = {}
+  const hoisted: [string, JSONSchema][] = []
   for (const pointer of pointers) {
     const target = resolvePointer(schema, pointer)
-    if (typeof target !== 'object' || target === null) continue
+    if (!isSchemaNode(target)) continue
     const tokens = pointer.slice(2).split('/').map(decodeToken)
     const base = tokens.at(-1) ?? 'Definition'
     let name = base
-    for (let index = 2; taken.has(name); index++) name = `${base}${index}`
+    for (let index = 2; taken.has(name); index += 1) name = `${base}${index}`
     taken.add(name)
     refs.set(pointer, `#/${container}/${encodeURIComponent(name)}`)
-    hoisted[name] = target
+    hoisted.push([name, target])
   }
-  if (refs.size === 0) return schema
-  const rewritten = rewriteRefs(schema, refs) as JSONSchema
-  const hoistedRewritten = rewriteRefs(hoisted, refs) as { readonly [k: string]: JSONSchema }
-  return {
-    ...rewritten,
-    [container]: { ...rewritten[container], ...hoistedRewritten },
+  const rewritten = rewriteRefs(schema, refs)
+  if (refs.size === 0 || !isSchemaNode(rewritten)) return schema
+  const added: { [name: string]: JSONSchema } = {}
+  for (const [name, target] of hoisted) {
+    const node = rewriteRefs(target, refs)
+    if (isSchemaNode(node)) added[name] = node
   }
+  return { ...rewritten, [container]: { ...rewritten[container], ...added } }
 }

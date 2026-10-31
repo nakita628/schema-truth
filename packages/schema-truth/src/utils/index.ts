@@ -240,9 +240,8 @@ function conformDefault(
     if (type === 'array') {
       if (!Array.isArray(value)) return undefined
       const items = schema.items
-      if (items === undefined || typeof items === 'boolean' || Array.isArray(items)) return asIs
-      const itemSchema = items as DefaultSchema
-      const readItems = value.map((item) => conform(itemSchema, item))
+      if (!isDefaultSchemaObject(items)) return asIs
+      const readItems = value.map((item) => conform(items, item))
       return readItems.every((item) => item.keep)
         ? { keep: true, value: readItems.map((item) => item.value) }
         : undefined
@@ -307,6 +306,12 @@ function typeOf(value: unknown): string | undefined {
   if (Array.isArray(value)) return 'array'
   if (isDeclaredObject(value)) return 'object'
   return undefined
+}
+
+function isDefaultSchemaObject(
+  value: DefaultSchema | readonly DefaultSchema[] | boolean | undefined,
+): value is DefaultSchema {
+  return typeof value === 'object' && !Array.isArray(value)
 }
 
 function isDeclaredObject(value: unknown): value is { readonly [key: string]: unknown } {

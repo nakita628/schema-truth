@@ -15,11 +15,16 @@ const ConnectionBase: Schema.Schema<_ConnectionBase> = Schema.Struct({
   type: Schema.optional(Schema.Literals(['Sample', 'Kafka'])),
 })
 
-const KafkaConnection: Schema.Schema<_KafkaConnection> = Schema.suspend(() => ConnectionBase).check(
-  Schema.makeFilter((input) =>
-    Schema.is(Schema.Struct({ bootstrapServers: Schema.optional(Schema.String) }))(input),
-  ),
-)
+const KafkaConnection: Schema.Schema<_KafkaConnection> = (() => {
+  const M0 = Schema.suspend(() => ConnectionBase)
+  const M1 = Schema.Struct({ bootstrapServers: Schema.optional(Schema.String) })
+  return Schema.Unknown.pipe(
+    Schema.refine(
+      (input): input is typeof M0.Type & typeof M1.Type =>
+        Schema.is(M0)(input) && Schema.is(M1)(input),
+    ),
+  )
+})()
 
 const SampleConnection: Schema.Schema<_SampleConnection> = Schema.suspend(() => ConnectionBase)
 

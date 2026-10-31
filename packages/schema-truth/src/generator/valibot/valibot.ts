@@ -34,6 +34,8 @@ import {
   wireArrayOnce,
   wireNumericKind,
   withoutParameterSerialization,
+  evaluatedProperties,
+  isEvaluatedKeyExpression,
 } from '../../helper/index.js'
 import type { ValibotWrapOptions } from '../../helper/index.js'
 import type { EmitOptions } from '../../options/index.js'
@@ -94,6 +96,33 @@ function stringbool(errorArg: string): string {
 function elementMessageWrap(inner: string, msg: string) {
   const msgExpr = issueMessageExpression(msg)
   return `v.pipe(v.unknown(),v.rawCheck(({dataset,addIssue})=>{if(!dataset.typed)return;const result=v.safeParse(${inner},dataset.value);if(!result.success){for(const issue of result.issues){if(issue.path&&issue.path.length>0){addIssue({message:${msgExpr},path:issue.path})}else{addIssue(issue)}}}}))`
+}
+
+/**
+ * An `allOf` with `unevaluatedProperties` beside it: the members' objects strip what they
+ * do not declare, so the keys no member evaluates are checked on the input before it is
+ * parsed. `inner` as given when the keyword is absent or every key is evaluated.
+ */
+function unevaluatedPropertiesCheck(
+  inner: string,
+  schema: JSONSchema,
+  rootName: string,
+  isValibot: boolean,
+  options: EmitOptions | undefined,
+): string {
+  const unevaluated = schema.unevaluatedProperties
+  if (unevaluated !== false && (typeof unevaluated !== 'object' || unevaluated === null)) {
+    return inner
+  }
+  const evaluated = evaluatedProperties(schema, options?.definitions)
+  if (evaluated === undefined) return inner
+  const isEvaluated = isEvaluatedKeyExpression(evaluated, 'k')
+  const message = schema['x-unevaluatedProperties-message']
+  const check =
+    unevaluated === false
+      ? `for(const k of Object.keys(o)){if(${isEvaluated})continue;addIssue({message:${message === undefined ? `'Unevaluated property: '+k` : JSON.stringify(message)}})}`
+      : `const Unevaluated=${valibot(unevaluated, rootName, isValibot, options)};for(const [k,val] of Object.entries(o)){if(${isEvaluated})continue;const result=v.safeParse(Unevaluated,val);if(!result.success){for(const issue of result.issues){addIssue({message:${message === undefined ? 'issue.message' : JSON.stringify(message)}})}}}`
+  return `v.pipe(v.unknown(),v.rawCheck(({dataset,addIssue})=>{if(!dataset.typed)return;const o=dataset.value;if(typeof o!=='object'||o===null||Array.isArray(o))return;${check}}),${inner})`
 }
 
 /**
@@ -228,11 +257,12 @@ function node(
           return `v.pipe(v.unknown(),v.rawCheck(({dataset,addIssue})=>{if(!dataset.typed)return;const result=v.safeParse(${intersected},dataset.value);if(!result.success){for(const issue of result.issues){addIssue({message:${msgExpr},path:issue.path})}}}))`
         })()
       : intersected
+    const checked = unevaluatedPropertiesCheck(baseResult, schema, rootName, isValibot, options)
     if (defaultValue !== undefined) {
-      const withNullable = nullable ? `v.nullable(${baseResult})` : baseResult
+      const withNullable = nullable ? `v.nullable(${checked})` : checked
       return `v.optional(${withNullable},${jsLiteral(defaultValue)})`
     }
-    return valibotWrap(baseResult, { ...schema, nullable })
+    return valibotWrap(checked, { ...schema, nullable })
   }
 
   if (schema.not) {

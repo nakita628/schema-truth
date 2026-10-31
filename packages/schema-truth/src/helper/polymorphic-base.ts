@@ -63,7 +63,7 @@ export function separatePolymorphicBases(definitions: Definitions): Definitions 
         allOf: subtypeSchema.allOf.map((member) => {
           const parts = member.$ref === undefined ? undefined : refParts(member.$ref)
           return parts?.name === name
-            ? { ...member, $ref: `${parts.prefix}${encodeURIComponent(baseName)}` satisfies Ref }
+            ? withRef(member, `${parts.prefix}${encodeURIComponent(baseName)}`)
             : member
         }),
       }
@@ -72,10 +72,14 @@ export function separatePolymorphicBases(definitions: Definitions): Definitions 
   return changed ? result : definitions
 }
 
+function withRef(schema: JSONSchema, $ref: Ref): JSONSchema {
+  return { ...schema, $ref }
+}
+
 function unusedName(name: string, taken: Definitions): string {
   if (!Object.hasOwn(taken, name)) return name
   let index = 2
-  while (Object.hasOwn(taken, `${name}${index}`)) index++
+  while (Object.hasOwn(taken, `${name}${index}`)) index += 1
   return `${name}${index}`
 }
 

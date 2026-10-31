@@ -32,6 +32,8 @@ import {
   wireArrayOnce,
   wireNumericKind,
   withoutParameterSerialization,
+  evaluatedProperties,
+  isEvaluatedKeyExpression,
 } from '../../helper/index.js'
 import type { EffectWrapOptions } from '../../helper/index.js'
 import type { EmitOptions } from '../../options/index.js'
@@ -81,6 +83,15 @@ function intersect(schemas: readonly string[]): string {
   if (schemas.every(isStructExpr)) {
     return `Schema.Struct({${schemas.map((s) => `...${s}.fields`).join(',')}})`
   }
+  // A `Schema.suspend` takes no check, and a check on a decoded struct no longer sees the
+  // keys the struct strips: the input is tested against every member as it is, and the
+  // refinement says the value has every member's type.
+  if (schemas.some((s) => s.startsWith('Schema.suspend('))) {
+    const members = schemas.map((s, i) => `const M${i}=${s}`).join(';')
+    const type = schemas.map((_, i) => `typeof M${i}.Type`).join('&')
+    const test = schemas.map((_, i) => `Schema.is(M${i})(input)`).join('&&')
+    return `(()=>{${members};return Schema.Unknown.pipe(Schema.refine((input):input is ${type}=>${test}))})()`
+  }
   return `${first}.check(${rest.map((s) => `Schema.makeFilter((input)=>Schema.is(${s})(input))`).join(',')})`
 }
 
@@ -96,6 +107,33 @@ function intersect(schemas: readonly string[]): string {
  */
 export function wholeValueMessage(inner: string, message: string): string {
   return `Schema.Unknown.check(Schema.makeFilter((input)=>Schema.is(${inner})(input),${effectError(message)})).pipe(Schema.decodeTo(${inner}))`
+}
+
+/**
+ * An `allOf` with `unevaluatedProperties` beside it: the members' structs strip what they
+ * do not declare, so the keys no member evaluates are checked on the input before it is
+ * decoded. `inner` as given when the keyword is absent or every key is evaluated.
+ */
+function unevaluatedPropertiesCheck(
+  inner: string,
+  schema: JSONSchema,
+  rootName: string,
+  isEffect: boolean,
+  options: EmitOptions | undefined,
+): string {
+  const unevaluated = schema.unevaluatedProperties
+  if (unevaluated !== false && (typeof unevaluated !== 'object' || unevaluated === null)) {
+    return inner
+  }
+  const evaluated = evaluatedProperties(schema, options?.definitions)
+  if (evaluated === undefined) return inner
+  const isEvaluated = isEvaluatedKeyExpression(evaluated, 'k')
+  const accepts =
+    unevaluated === false
+      ? 'false'
+      : `Schema.is(${effect(unevaluated, rootName, isEffect, options)})(v)`
+  const predicate = `(input)=>typeof input!=='object'||input===null||Array.isArray(input)||Object.entries(input).every(([k,v])=>${isEvaluated}||${accepts})`
+  return `Schema.Unknown.check(Schema.makeFilter(${predicate}${effectErrorPart(schema['x-unevaluatedProperties-message'])})).pipe(Schema.decodeTo(${inner}))`
 }
 
 /**
@@ -220,7 +258,8 @@ function node(
     if (schemas.length === 0) return effectWrap('Schema.Unknown', { ...schema, nullable })
     const intersected = schemas.length === 1 ? schemas[0] : intersect(schemas)
     const allOfMessage = schema['x-allOf-message']
-    const baseResult = allOfMessage ? wholeValueMessage(intersected, allOfMessage) : intersected
+    const messaged = allOfMessage ? wholeValueMessage(intersected, allOfMessage) : intersected
+    const baseResult = unevaluatedPropertiesCheck(messaged, schema, rootName, isEffect, options)
     if (defaultValue !== undefined) {
       // `Schema.NullOr` wraps a schema, so it stays inside the decoding default.
       const withNullable = nullable ? `Schema.NullOr(${baseResult})` : baseResult

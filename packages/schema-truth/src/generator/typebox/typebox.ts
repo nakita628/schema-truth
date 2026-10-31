@@ -235,14 +235,22 @@ export function typebox(
     if (schemas.length === 0) {
       return typeboxWrap(tbPrim('Type.Any', schema, [], hostRef), { ...schema, nullable })
     }
+    // TypeBox evaluates `unevaluatedProperties` across the intersection itself.
+    const unevaluated = schema.unevaluatedProperties
+    const unevaluatedOpt =
+      unevaluated === false
+        ? ['unevaluatedProperties:false']
+        : typeof unevaluated === 'object' && unevaluated !== null
+          ? [`unevaluatedProperties:${typebox(unevaluated, rootName, isTypebox, childOptions)}`]
+          : []
     const baseResult =
-      schemas.length === 1
+      schemas.length === 1 && unevaluatedOpt.length === 0
         ? schemas[0]
         : tbComp(
             'Type.Intersect',
             `[${schemas.join(',')}]`,
             schema,
-            messageOpt(schema['x-allOf-message']),
+            [...messageOpt(schema['x-allOf-message']), ...unevaluatedOpt],
             hostRef,
           )
     if (defaultValue !== undefined) {
