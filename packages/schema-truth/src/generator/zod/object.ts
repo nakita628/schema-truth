@@ -7,8 +7,8 @@ import {
 import { propertyEmitOptions } from '../../helper/parameter.js'
 import type { EmitOptions } from '../../options/index.js'
 import type { JSONSchema } from '../../parser/index.js'
-import { issueMessageExpression, makeSafeKey, zodError, zodErrorPart } from '../../utils/index.js'
-import { zod } from './zod.js'
+import { makeSafeKey, zodError, zodErrorPart } from '../../utils/index.js'
+import { nestedIssueMessageWrap, zod } from './zod.js'
 
 /**
  * A parameter object answers an `Object.prototype` name it was not sent with the inherited
@@ -117,12 +117,7 @@ export function object(
 
   const rawBase = `z.${objectType}({${props.join(',')}}${objectParams})`
   const propsMessage = schema['x-properties-message']
-  const partialBase = propsMessage
-    ? (() => {
-        const msgExpr = issueMessageExpression(propsMessage)
-        return `(()=>{const Schema=${rawBase};return z.unknown().check((ctx)=>{const result=Schema.safeParse(ctx.value);if(!result.success){for(const issue of result.error.issues){if(issue.path.length>0){ctx.issues.push({...issue,message:${msgExpr}})}else{ctx.issues.push(issue)}}}}).pipe(Schema)})()`
-      })()
-    : rawBase
+  const partialBase = propsMessage ? nestedIssueMessageWrap(rawBase, propsMessage) : rawBase
 
   const minProperties =
     typeof schema.minProperties === 'number'

@@ -84,9 +84,25 @@ function zodNotPredicate(inner: JSONSchema, parent: JSONSchema): string | undefi
   return undefined
 }
 
+/**
+ * Re-push `issue` into `ctx` with `message`. Each issue code is narrowed first: the union of
+ * parsed issues does not type-check as a raw issue, while each member does.
+ */
+export function forwardIssue(message: string): string {
+  return ZOD_ISSUE_CODES.map(
+    (c, i) =>
+      `${i === 0 ? '' : 'else '}if(issue.code==='${c}'){ctx.issues.push({...issue,input:issue.input,message:${message}})}`,
+  ).join('')
+}
+
+/** A message for the issues under the value (with a path); the root's own issues keep theirs. */
+export function nestedIssueMessageWrap(inner: string, msg: string): string {
+  const msgExpr = `issue.path.length>0?${issueMessageExpression(msg)}:issue.message`
+  return `(()=>{const Schema=${inner};return z.unknown().check((ctx)=>{const result=Schema.safeParse(ctx.value);if(!result.success){for(const issue of result.error.issues){${forwardIssue(msgExpr)}}}}).pipe(Schema)})()`
+}
+
 function elementMessageWrap(inner: string, msg: string) {
-  const msgExpr = issueMessageExpression(msg)
-  return `(()=>{const Schema=${inner};return z.unknown().check((ctx)=>{const result=Schema.safeParse(ctx.value);if(!result.success){for(const issue of result.error.issues){if(issue.path.length>0){ctx.issues.push({...issue,message:${msgExpr}})}else{ctx.issues.push(issue)}}}}).pipe(Schema)})()`
+  return nestedIssueMessageWrap(inner, msg)
 }
 
 /**
@@ -256,10 +272,7 @@ function node(
     const baseResult = allOfMessage
       ? (() => {
           const msgExpr = issueMessageExpression(allOfMessage)
-          const branches = ZOD_ISSUE_CODES.map(
-            (c, i) =>
-              `${i === 0 ? '' : 'else '}if(issue.code==='${c}'){ctx.issues.push({...issue,input:issue.input,message:${msgExpr}})}`,
-          ).join('')
+          const branches = forwardIssue(msgExpr)
           return `(()=>{const Schema=${intersected};return z.unknown().check((ctx)=>{const result=Schema.safeParse(ctx.value);if(!result.success){for(const issue of result.error.issues){${branches}}}}).pipe(Schema)})()`
         })()
       : intersected
