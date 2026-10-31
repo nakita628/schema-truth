@@ -38,15 +38,18 @@ const D: Schema.Schema<_D> = Schema.Struct({
 const B: Schema.Schema<_B> = Schema.Struct({
   type: Schema.Literal('B'),
   name: Schema.String,
-  detail: Schema.suspend(() => D).check(
-    Schema.makeFilter((input) =>
-      Schema.is(
-        Schema.Struct({
-          comment: Schema.String.pipe(Schema.withDecodingDefault(Effect.succeed('N/A'))),
-        }),
-      )(input),
-    ),
-  ),
+  detail: (() => {
+    const M0 = Schema.suspend(() => D)
+    const M1 = Schema.Struct({
+      comment: Schema.String.pipe(Schema.withDecodingDefault(Effect.succeed('N/A'))),
+    })
+    return Schema.Unknown.pipe(
+      Schema.refine(
+        (input): input is typeof M0.Type & typeof M1.Type =>
+          Schema.is(Schema.toEncoded(M0))(input) && Schema.is(Schema.toEncoded(M1))(input),
+      ),
+    )
+  })(),
 })
 
 const C: Schema.Schema<_C> = Schema.Struct({

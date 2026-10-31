@@ -11,6 +11,7 @@ import {
 import {
   constraintMessage,
   constraintPredicate,
+  evaluatedProperties,
   foldAllOfMembers,
   impliedWireType,
   isKeywordOnlyMember,
@@ -19,6 +20,7 @@ import {
   isPrimitiveUnion,
   itemsSchemaOf,
   isBigintFormat,
+  isEvaluatedKeyExpression,
   notPredicate,
   valueListLiteral,
   refTarget,
@@ -115,6 +117,33 @@ export function zod(
 function keywordConstraint(schema: JSONSchema): string {
   const body = constraintPredicate(schema, 'val')
   return `z.any().refine((val) => ${body}${zodErrorPart(constraintMessage(schema))})`
+}
+
+/**
+ * An `allOf` with `unevaluatedProperties` beside it: the members' objects strip what they
+ * do not declare, so the keys no member evaluates are checked on the input before it is
+ * parsed. `inner` as given when the keyword is absent or every key is evaluated.
+ */
+function unevaluatedPropertiesCheck(
+  inner: string,
+  schema: JSONSchema,
+  rootName: string,
+  isZod: boolean,
+  options: EmitOptions | undefined,
+): string {
+  const unevaluated = schema.unevaluatedProperties
+  if (unevaluated !== false && (typeof unevaluated !== 'object' || unevaluated === null)) {
+    return inner
+  }
+  const evaluated = evaluatedProperties(schema, options?.definitions)
+  if (evaluated === undefined) return inner
+  const isEvaluated = isEvaluatedKeyExpression(evaluated, 'k')
+  const message = schema['x-unevaluatedProperties-message']
+  const check =
+    unevaluated === false
+      ? `for(const k of Object.keys(o)){if(${isEvaluated})continue;ctx.issues.push({code:'custom',input:o,path:[k],message:${message === undefined ? '`Unrecognized key: "${k}"`' : JSON.stringify(message)}})}`
+      : `const Unevaluated=${zod(unevaluated, rootName, isZod, options)};for(const [k,v] of Object.entries(o)){if(${isEvaluated})continue;const result=Unevaluated.safeParse(v);if(!result.success){for(const issue of result.error.issues){ctx.issues.push({code:'custom',input:v,path:[k,...issue.path],message:${message === undefined ? 'issue.message' : JSON.stringify(message)}})}}}`
+  return `(()=>{const Schema=${inner};return z.unknown().check((ctx)=>{const o=ctx.value;if(typeof o!=='object'||o===null||Array.isArray(o))return;${check}}).pipe(Schema)})()`
 }
 
 function node(
@@ -220,6 +249,7 @@ function node(
           return `(()=>{const Schema=${intersected};return z.unknown().check((ctx)=>{const result=Schema.safeParse(ctx.value);if(!result.success){for(const issue of result.error.issues){${branches}}}}).pipe(Schema)})()`
         })()
       : intersected
+    const checked = unevaluatedPropertiesCheck(baseResult, schema, rootName, isZod, options)
     // Carry the default through `merged` so zodWrap applies `.nullable()` before
     // `.default()`; a `default: null` is only valid against the nullable type.
     const mergedDefault = defaultValue !== undefined ? defaultValue : schema.default
@@ -228,7 +258,7 @@ function node(
       nullable,
       ...(mergedDefault !== undefined && { default: mergedDefault }),
     }
-    return zodWrap(baseResult, merged)
+    return zodWrap(checked, merged)
   }
 
   if (schema.not) {

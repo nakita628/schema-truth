@@ -218,6 +218,77 @@ describe('helper', () => {
       ).toStrictEqual({ keep: true, value: { fetch_connection_secrets: false } })
     })
 
+    it('reads text that spells a value of the type as that value (#394)', () => {
+      expect(coerceDefault({ type: 'number' }, '7')).toStrictEqual({ keep: true, value: 7 })
+      expect(coerceDefault({ type: 'integer' }, '1.5')).toStrictEqual({
+        keep: false,
+        value: '1.5',
+      })
+      expect(coerceDefault({ type: 'string' }, 1)).toStrictEqual({ keep: true, value: '1' })
+    })
+
+    it('drops a scalar default that is not a value of the type (#403)', () => {
+      expect(coerceDefault({ type: 'integer', nullable: true }, 'null')).toStrictEqual({
+        keep: false,
+        value: 'null',
+      })
+    })
+
+    it('keeps only what an enum or const lists', () => {
+      expect(coerceDefault({ type: 'string', enum: ['a', 'b'] }, "'a'")).toStrictEqual({
+        keep: false,
+        value: "'a'",
+      })
+      expect(coerceDefault({ enum: ['a', 'b'] }, 'b')).toStrictEqual({ keep: true, value: 'b' })
+      expect(coerceDefault({ const: 1 }, 2)).toStrictEqual({ keep: false, value: 2 })
+    })
+
+    it('reads a $ref or an allOf member as the definition it names (#394)', () => {
+      const definitions = {
+        Precision: { type: 'number' },
+        Mode: { type: 'string', enum: ['coerce', 'strict'] },
+      }
+      expect(
+        coerceDefault({ allOf: [{ $ref: '#/$defs/Precision' }] }, '7', definitions),
+      ).toStrictEqual({ keep: true, value: 7 })
+      expect(
+        coerceDefault({ allOf: [{ $ref: '#/$defs/Mode' }] }, "'strict'", definitions),
+      ).toStrictEqual({ keep: false, value: "'strict'" })
+      expect(coerceDefault({ $ref: '#/$defs/Mode' }, 'strict', definitions)).toStrictEqual({
+        keep: true,
+        value: 'strict',
+      })
+      expect(coerceDefault({ $ref: '#/$defs/Unknown' }, 'x', definitions)).toStrictEqual({
+        keep: true,
+        value: 'x',
+      })
+    })
+
+    it('keeps a default a union member takes, whatever type sits beside it (#396)', () => {
+      expect(
+        coerceDefault(
+          { type: 'string', oneOf: [{ type: 'string', enum: ['cover'] }, { type: 'boolean' }] },
+          false,
+        ),
+      ).toStrictEqual({ keep: true, value: false })
+    })
+
+    it('checks array items and required object keys', () => {
+      expect(
+        coerceDefault({ type: 'array', items: { type: 'boolean' } }, ['true', false]),
+      ).toStrictEqual({ keep: true, value: [true, false] })
+      expect(coerceDefault({ type: 'array', items: { type: 'boolean' } }, ['x'])).toStrictEqual({
+        keep: false,
+        value: ['x'],
+      })
+      expect(
+        coerceDefault(
+          { type: 'object', properties: { a: { type: 'string' } }, required: ['a'] },
+          {},
+        ),
+      ).toStrictEqual({ keep: false, value: {} })
+    })
+
     it('keeps undeclared keys when additional properties are allowed', () => {
       expect(
         coerceDefault(

@@ -1,5 +1,5 @@
 import { DEFAULT_ROOT_NAME, DEFINITION_REF_PREFIXES } from '../constants/index.js'
-import { isRootRef, isShapelessMember } from '../guard/index.js'
+import { isNullable, isNullTypeMember, isRootRef, isShapelessMember } from '../guard/index.js'
 import type { JSONSchema } from '../parser/index.js'
 import { makeSafeKey, normalizeTypes, toPascalCase } from '../utils/index.js'
 import { itemsSchemaOf } from './schema.js'
@@ -30,6 +30,15 @@ export function typeDeclaration(
   rootName: string = DEFAULT_ROOT_NAME,
 ): string {
   if (schema === undefined) return ''
+  const base = nonNullType(schema, flavour, rootName)
+  // `nullable` (OpenAPI 3.0), a `null` among the types or a `{ type: 'null' }` allOf member
+  // widens what the schema emits with `.nullable()`, so the declaration has to say so too.
+  const nullable = isNullable(schema) || schema.allOf?.some(isNullTypeMember) === true
+  if (!nullable || base === 'null' || base === 'unknown') return base
+  return `(${base} | null)`
+}
+
+function nonNullType(schema: JSONSchema, flavour: TypeFlavour, rootName: string): string {
   const type = (s: JSONSchema | undefined): string => typeDeclaration(s, flavour, rootName)
 
   if (schema.$ref) {

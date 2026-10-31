@@ -146,6 +146,12 @@ describe('type', () => {
       expect(type({ type: 'null' })).toBe('null')
     })
 
+    it('should add null for a nullable type (#403)', () => {
+      expect(type({ type: 'integer', nullable: true })).toBe('(number | null)')
+      expect(type({ type: ['string', 'null'] })).toBe('(string | null)')
+      expect(type({ $ref: '#/$defs/User', nullable: true })).toBe('(_User | null)')
+    })
+
     it('should handle multiple types', () => {
       expect(type({ type: ['string', 'number'] })).toBe('(string | number)')
     })
@@ -248,20 +254,20 @@ describe('type', () => {
   })
 
   describe('allOf intersection', () => {
-    it('should exclude null types', () => {
+    it('should read a null member as null beside the intersection', () => {
       expect(
         type({
           allOf: [{ type: 'object', properties: { name: { type: 'string' } } }, { type: 'null' }],
         }),
-      ).toBe('{name?: string}')
+      ).toBe('({name?: string} | null)')
     })
 
-    it('should exclude nullable: true only', () => {
+    it('should read a nullable: true only member as null beside the intersection', () => {
       expect(
         type({
           allOf: [{ type: 'object', properties: { name: { type: 'string' } } }, { nullable: true }],
         }),
-      ).toBe('{name?: string}')
+      ).toBe('({name?: string} | null)')
     })
 
     it('should exclude simple properties with default', () => {

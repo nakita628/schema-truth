@@ -4,11 +4,13 @@ import {
   cyclicDefinitionNames,
   hasNotKeyword,
   hasRootSelfReference,
+  hoistNestedRefs,
   missingDefinitionComment,
   planDocument,
   renderDefinitions,
   rootNameOf,
   schemaNamer,
+  withPolymorphicBases,
 } from '../../helper/index.js'
 import type { GenerateOptions } from '../../options/index.js'
 import type { JSONSchema } from '../../parser/index.js'
@@ -38,7 +40,10 @@ function importLine(emitted: string): string {
  * with plain `const` declarations, so a cyclic document becomes one
  * `Type.Cyclic($defs, root)` map instead.
  */
-export function schemaToTypebox(schema: JSONSchema, options?: TypeboxGenerateOptions): string {
+export function schemaToTypebox(input: JSONSchema, options?: TypeboxGenerateOptions): string {
+  // Every schema a reference reaches is a top-level definition, and a polymorphic base
+  // and its subtypes do not refer to each other in a loop.
+  const schema = withPolymorphicBases(hoistNestedRefs(input))
   const exportType = options?.exportType ?? true
   const openapi = options?.openapi ?? false
   const hostRef = options?.ref
