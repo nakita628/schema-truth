@@ -4,10 +4,12 @@ import {
   emitOptionsOf,
   findCodeExtensionKeysInSchema,
   hasRootSelfReference,
+  hoistNestedRefs,
   planDocument,
   renderDefinitions,
   rootNameOf,
   schemaNamer,
+  withPolymorphicBases,
 } from '../../helper/index.js'
 import type { GenerateOptions } from '../../options/index.js'
 import type { JSONSchema } from '../../parser/index.js'
@@ -29,7 +31,10 @@ function annotation(name: string) {
  * A whole JSON Schema document as a Valibot module: imports, `$defs` in dependency
  * order, the root export, and the inferred output type.
  */
-export function schemaToValibot(schema: JSONSchema, options?: GenerateOptions): string {
+export function schemaToValibot(input: JSONSchema, options?: GenerateOptions): string {
+  // Every schema a reference reaches is a top-level definition, and a polymorphic base
+  // and its subtypes do not refer to each other in a loop.
+  const schema = withPolymorphicBases(hoistNestedRefs(input))
   const exportType = options?.exportType ?? true
   const baseOptions = emitOptionsOf(options)
   const codeExtensionsPresent =

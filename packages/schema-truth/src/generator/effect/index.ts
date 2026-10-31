@@ -4,10 +4,12 @@ import {
   emitOptionsOf,
   findCodeExtensionKeysInSchema,
   hasRootSelfReference,
+  hoistNestedRefs,
   planDocument,
   renderDefinitions,
   rootNameOf,
   schemaNamer,
+  withPolymorphicBases,
 } from '../../helper/index.js'
 import type { GenerateOptions } from '../../options/index.js'
 import type { JSONSchema } from '../../parser/index.js'
@@ -24,7 +26,10 @@ const EFFECT_ROOT_FALLBACK = `${DEFAULT_ROOT_NAME}_`
  * `options.readonly` is accepted for API symmetry and is a no-op: `Schema.Struct` and
  * `Schema.Array` are already readonly at the type level.
  */
-export function schemaToEffect(schema: JSONSchema, options?: GenerateOptions): string {
+export function schemaToEffect(input: JSONSchema, options?: GenerateOptions): string {
+  // Every schema a reference reaches is a top-level definition, and a polymorphic base
+  // and its subtypes do not refer to each other in a loop.
+  const schema = withPolymorphicBases(hoistNestedRefs(input))
   const exportType = options?.exportType ?? true
   const baseOptions = emitOptionsOf(options)
   const codeExtensionsPresent =

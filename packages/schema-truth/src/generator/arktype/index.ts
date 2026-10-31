@@ -2,10 +2,12 @@ import { UNSAFE_GENERATED_MARKER } from '../../constants/index.js'
 import {
   emitOptionsOf,
   findCodeExtensionKeysInSchema,
+  hoistNestedRefs,
   missingDefinitionComment,
   planDocument,
   rootNameOf,
   schemaNamer,
+  withPolymorphicBases,
 } from '../../helper/index.js'
 import type { GenerateOptions } from '../../options/index.js'
 import type { JSONSchema } from '../../parser/index.js'
@@ -17,7 +19,10 @@ import { arktype } from './arktype.js'
  * a `scope({...}).export()` so members can name one another; one without is a bare
  * `type(...)` export.
  */
-export function schemaToArktype(schema: JSONSchema, options?: GenerateOptions): string {
+export function schemaToArktype(input: JSONSchema, options?: GenerateOptions): string {
+  // Every schema a reference reaches is a top-level definition, and a polymorphic base
+  // and its subtypes do not refer to each other in a loop.
+  const schema = withPolymorphicBases(hoistNestedRefs(input))
   const exportType = options?.exportType ?? true
   const emitOptions = emitOptionsOf(options)
   const codeExtensionsPresent =
