@@ -13,7 +13,9 @@ export const Bucket: Schema.Schema<_Bucket> = Schema.Unknown.check(
       input === null ||
       Array.isArray(input) ||
       Object.entries(input).every(
-        ([k, v]) => ['meta', 'doc_count'].includes(k) || Schema.is(Schema.suspend(() => Base))(v),
+        ([k, v]) =>
+          ['meta', 'doc_count'].includes(k) ||
+          Schema.is(Schema.toEncoded(Schema.suspend(() => Base)))(v),
       ),
   ),
 ).pipe(

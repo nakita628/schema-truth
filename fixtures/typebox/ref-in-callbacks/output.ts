@@ -10,7 +10,11 @@ export const Doc = Type.Object(
     list: Type.Optional(Type.Array(Type.Object({}))),
     kind: Type.Optional(Type.String()),
   },
-  { patternProperties: { '^p-': Base }, errorMessage: { properties: 'bad doc' } },
+  {
+    patternProperties: { '^p-': Base },
+    unevaluatedProperties: Base,
+    errorMessage: { properties: 'bad doc' },
+  },
 )
 
 export type Doc = Static<typeof Doc>

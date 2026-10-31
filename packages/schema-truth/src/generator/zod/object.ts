@@ -5,6 +5,7 @@ import {
   isStringWireLocation,
 } from '../../guard/index.js'
 import { propertyEmitOptions } from '../../helper/parameter.js'
+import { isEvaluatedKeyExpression } from '../../helper/unevaluated.js'
 import type { EmitOptions } from '../../options/index.js'
 import type { JSONSchema } from '../../parser/index.js'
 import { makeSafeKey, zodError, zodErrorPart } from '../../utils/index.js'
@@ -75,22 +76,50 @@ export function object(
     return `${record}${recordPropNames}${recordPatternProps}`
   }
 
+  const properties = schema.properties ?? {}
+  // A required key no property declares only has to be present.
+  const undeclaredRequired = (schema.required ?? []).filter(
+    (key) => !Object.hasOwn(properties, key),
+  )
+  const unevaluated = schema.unevaluatedProperties
+  const closed = schema.additionalProperties === false || unevaluated === false
+  // A key outside `properties` is still allowed when a pattern or a schema covers it, so the
+  // object cannot simply reject undeclared keys.
+  const closedByCheck = closed && schema.patternProperties !== undefined
+  const unevaluatedSchema = typeof unevaluated === 'object' ? unevaluated : undefined
   if (!schema.properties) {
     if (schema.additionalProperties === true) return 'z.any()'
-    return 'z.object({})'
+    const checksKeys =
+      undeclaredRequired.length > 0 ||
+      schema.patternProperties !== undefined ||
+      unevaluatedSchema !== undefined ||
+      closed
+    if (!checksKeys) return 'z.object({})'
   }
 
-  const conditionalKeysReferenced = hasConditional(schema)
+  // `z.object()` strips the keys it does not declare before a refine sees the value, so a
+  // keyword that reads those keys needs the object to keep them.
+  const readsUndeclaredKeys =
+    hasConditional(schema) ||
+    schema.patternProperties !== undefined ||
+    schema.propertyNames !== undefined ||
+    schema.minProperties !== undefined ||
+    schema.maxProperties !== undefined ||
+    schema.dependentRequired !== undefined ||
+    schema.dependentSchemas !== undefined ||
+    undeclaredRequired.length > 0 ||
+    unevaluatedSchema !== undefined ||
+    closedByCheck
   const objectType =
     schema.additionalProperties === true
       ? 'looseObject'
-      : schema.additionalProperties === false || schema.unevaluatedProperties === false
+      : closed && !closedByCheck
         ? 'strictObject'
-        : conditionalKeysReferenced
+        : readsUndeclaredKeys
           ? 'looseObject'
           : 'object'
   const required = new Set(schema.required)
-  const props = Object.entries(schema.properties)
+  const props = Object.entries(properties)
     .map(([key, propSchema]) => {
       const parsed = zod(
         propSchema,
@@ -184,8 +213,23 @@ export function object(
     return parts.join('')
   })()
 
-  const objectExpr = `${partialBase}${minProperties}${maxProperties}${propertyNames}${patternProperties}${dependentRequired}${dependentSchemas}${ifThenElse}`
-  const hasInheritedName = Object.keys(schema.properties).some(isObjectPrototypeProperty)
+  const requiredPresent =
+    undeclaredRequired.length > 0
+      ? `.refine((val)=>${JSON.stringify(undeclaredRequired)}.every((key)=>key in val)${errorArg})`
+      : ''
+  // A key no property names and no pattern matches: refused when the object is closed,
+  // held to `unevaluatedProperties` when that is a schema.
+  const isEvaluated = isEvaluatedKeyExpression(
+    { names: Object.keys(properties), patterns: Object.keys(schema.patternProperties ?? {}) },
+    'key',
+  )
+  const unevaluatedKeys = closedByCheck
+    ? `.refine((val)=>Object.keys(val).every((key)=>${isEvaluated})${zodErrorPart(strictMessage ?? errorMessage)})`
+    : unevaluatedSchema !== undefined
+      ? `.refine((val)=>Object.entries(val).every(([key,value])=>${isEvaluated}||${zod(unevaluatedSchema, rootName, isZod, options)}.safeParse(value).success)${zodErrorPart(schema['x-unevaluatedProperties-message'] ?? errorMessage)})`
+      : ''
+  const objectExpr = `${partialBase}${minProperties}${maxProperties}${propertyNames}${patternProperties}${requiredPresent}${unevaluatedKeys}${dependentRequired}${dependentSchemas}${ifThenElse}`
+  const hasInheritedName = Object.keys(properties).some(isObjectPrototypeProperty)
   return isStringWireLocation(options?.paramIn) && hasInheritedName
     ? `z.preprocess(${OWN_PROPERTIES_PREPROCESS},${objectExpr})`
     : objectExpr

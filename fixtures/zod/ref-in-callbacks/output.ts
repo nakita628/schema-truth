@@ -11,7 +11,7 @@ const Base: z.ZodType<_Base> = z.object({ meta: z.string() })
 const NeedsKind: z.ZodType<_NeedsKind> = z.object({ kind: z.string() })
 
 export const Doc: z.ZodType<_Doc> = (() => {
-  const Schema = z.object({
+  const Schema = z.looseObject({
     a: z.string().exactOptional(),
     list: z
       .array(z.object({}))
@@ -103,6 +103,14 @@ export const Doc: z.ZodType<_Doc> = (() => {
   .refine((val) =>
     Object.entries(val).every(
       ([key, value]) => !new RegExp('^p-').test(key) || z.lazy(() => Base).safeParse(value).success,
+    ),
+  )
+  .refine((val) =>
+    Object.entries(val).every(
+      ([key, value]) =>
+        ['a', 'list', 'kind'].includes(key) ||
+        new RegExp('^p-').test(key) ||
+        z.lazy(() => Base).safeParse(value).success,
     ),
   )
   .refine((val) => !('a' in val) || z.lazy(() => NeedsKind).safeParse(val).success)

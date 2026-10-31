@@ -143,33 +143,43 @@ function isNumericMember(schema: JSONSchema): boolean {
   )
 }
 
+/** An ArkType regex index-signature key for `source`, its slashes escaped. */
+function indexKey(source: string): string {
+  return JSON.stringify(`[/${source.replaceAll('/', '\\/')}/]`)
+}
+
 /**
- * An `allOf` with `unevaluatedProperties` beside it: one more member whose regex index
- * signature matches every key no member evaluates (no listed name, no pattern matching
- * anywhere in it) and holds it to `unevaluatedProperties`. An index signature can name a
- * scope alias, which a `.narrow()` callback cannot. `undefined` when the keyword is absent
- * or every key is evaluated.
+ * The members an `allOf` gains from `patternProperties` and `unevaluatedProperties` beside
+ * it: a regex index signature per pattern, holding the keys it matches to its schema, and
+ * one matching every key no member evaluates (no listed name, no pattern matching anywhere
+ * in it), holding it to `unevaluatedProperties`. An index signature can name a scope alias,
+ * which a `.narrow()` callback cannot.
  */
-function unevaluatedPropertiesMember(
+function objectKeysMembers(
   schema: JSONSchema,
   rootName: string,
   isArktype: boolean,
   options: EmitOptions | undefined,
-): string | undefined {
+): readonly string[] {
+  const patternMembers = Object.entries(schema.patternProperties ?? {}).map(
+    ([pattern, propSchema]) =>
+      `{${indexKey(pattern)}:${arktype(propSchema, rootName, isArktype, options)}}`,
+  )
   const unevaluated = schema.unevaluatedProperties
   if (unevaluated !== false && (typeof unevaluated !== 'object' || unevaluated === null)) {
-    return undefined
+    return patternMembers
   }
   const evaluated = evaluatedProperties(schema, options?.definitions)
-  if (evaluated === undefined) return undefined
+  if (evaluated === undefined) return patternMembers
   const value =
     unevaluated === false ? '"never"' : arktype(unevaluated, rootName, isArktype, options)
-  const names = evaluated.names.map((name) => name.replaceAll(/[\\^$.*+?()[\]{}|/]/gu, '\\$&'))
+  // `indexKey` escapes the slashes; everything else a name may hold is escaped here.
+  const names = evaluated.names.map((name) => name.replaceAll(/[\\^$.*+?()[\]{}|]/gu, '\\$&'))
   const exclusions = [
     ...(names.length === 0 ? [] : [`(?!(?:${names.join('|')})$)`]),
-    ...evaluated.patterns.map((pattern) => `(?![\\s\\S]*?(?:${pattern.replaceAll('/', '\\/')}))`),
+    ...evaluated.patterns.map((pattern) => `(?![\\s\\S]*?(?:${pattern}))`),
   ]
-  return `{${JSON.stringify(`[/^${exclusions.join('')}/]`)}:${value}}`
+  return [...patternMembers, `{${indexKey(`^${exclusions.join('')}`)}:${value}}`]
 }
 
 /**
@@ -337,8 +347,7 @@ function node(
       isKeywordOnlyMember(s) ? keywordConstraint(s) : arktype(s, rootName, isArktype, options),
     )
     if (schemas.length === 0) return arktypeWrap('"unknown"', { ...schema, nullable })
-    const unevaluated = unevaluatedPropertiesMember(schema, rootName, isArktype, options)
-    const intersected = unevaluated === undefined ? schemas : [...schemas, unevaluated]
+    const intersected = [...schemas, ...objectKeysMembers(schema, rootName, isArktype, options)]
     const baseResult =
       intersected.length === 1 ? intersected[0] : intersectionStr(intersected, isArktype)
     return arktypeWrap(baseResult, { ...schema, nullable })

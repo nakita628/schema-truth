@@ -115,30 +115,41 @@ export function wholeValueMessage(inner: string, message: string): string {
 }
 
 /**
- * An `allOf` with `unevaluatedProperties` beside it: the members' structs strip what they
- * do not declare, so the keys no member evaluates are checked on the input before it is
- * decoded. `inner` as given when the keyword is absent or every key is evaluated.
+ * An `allOf` with `patternProperties` or `unevaluatedProperties` beside it: the members'
+ * structs strip what they do not declare, so the keys are checked on the input before it is
+ * decoded — a key a pattern matches against that pattern's schema, a key no member
+ * evaluates against `unevaluatedProperties`. `inner` as given when there is nothing to check.
  */
-function unevaluatedPropertiesCheck(
+function objectKeysCheck(
   inner: string,
   schema: JSONSchema,
   rootName: string,
   isEffect: boolean,
   options: EmitOptions | undefined,
 ): string {
+  const patterns = Object.entries(schema.patternProperties ?? {})
   const unevaluated = schema.unevaluatedProperties
-  if (unevaluated !== false && (typeof unevaluated !== 'object' || unevaluated === null)) {
-    return inner
-  }
-  const evaluated = evaluatedProperties(schema, options?.definitions)
-  if (evaluated === undefined) return inner
-  const isEvaluated = isEvaluatedKeyExpression(evaluated, 'k')
-  const accepts =
-    unevaluated === false
-      ? 'false'
-      : `Schema.is(${effect(unevaluated, rootName, isEffect, options)})(v)`
-  const predicate = `(input)=>typeof input!=='object'||input===null||Array.isArray(input)||Object.entries(input).every(([k,v])=>${isEvaluated}||${accepts})`
-  return `Schema.Unknown.check(Schema.makeFilter(${predicate}${effectErrorPart(schema['x-unevaluatedProperties-message'])})).pipe(Schema.decodeTo(${inner}))`
+  const unevaluatedSchema = typeof unevaluated === 'object' ? unevaluated : undefined
+  const evaluated =
+    unevaluated === false || unevaluatedSchema !== undefined
+      ? evaluatedProperties(schema, options?.definitions)
+      : undefined
+  // The input is checked against each schema's encoded side, the side it is read from.
+  const accepts = (s: JSONSchema) =>
+    `Schema.is(Schema.toEncoded(${effect(s, rootName, isEffect, options)}))(v)`
+  const filters = [
+    ...patterns.map(
+      ([pattern, propSchema]) =>
+        `Schema.makeFilter((input)=>typeof input!=='object'||input===null||Array.isArray(input)||Object.entries(input).every(([k,v])=>!new RegExp(${JSON.stringify(pattern)}).test(k)||${accepts(propSchema)})${effectErrorPart(schema['x-patternProperties-message'])})`,
+    ),
+    ...(evaluated === undefined
+      ? []
+      : [
+          `Schema.makeFilter((input)=>typeof input!=='object'||input===null||Array.isArray(input)||Object.entries(input).every(([k,v])=>${isEvaluatedKeyExpression(evaluated, 'k')}||${unevaluatedSchema === undefined ? 'false' : accepts(unevaluatedSchema)})${effectErrorPart(schema['x-unevaluatedProperties-message'])})`,
+        ]),
+  ]
+  if (filters.length === 0) return inner
+  return `Schema.Unknown.check(${filters.join(',')}).pipe(Schema.decodeTo(${inner}))`
 }
 
 /**
@@ -279,7 +290,7 @@ function node(
     const intersected = schemas.length === 1 ? schemas[0] : intersect(schemas)
     const allOfMessage = schema['x-allOf-message']
     const messaged = allOfMessage ? wholeValueMessage(intersected, allOfMessage) : intersected
-    const baseResult = unevaluatedPropertiesCheck(messaged, schema, rootName, isEffect, options)
+    const baseResult = objectKeysCheck(messaged, schema, rootName, isEffect, options)
     if (defaultValue !== undefined) {
       // `Schema.NullOr` wraps a schema, so it stays inside the decoding default.
       const withNullable = nullable ? `Schema.NullOr(${baseResult})` : baseResult

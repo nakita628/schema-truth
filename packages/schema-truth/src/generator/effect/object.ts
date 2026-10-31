@@ -4,7 +4,12 @@ import {
   isObjectPrototypeProperty,
   isStringWireLocation,
 } from '../../guard/index.js'
-import { effectPreprocess, ownProperties, propertyEmitOptions } from '../../helper/index.js'
+import {
+  effectPreprocess,
+  isEvaluatedKeyExpression,
+  ownProperties,
+  propertyEmitOptions,
+} from '../../helper/index.js'
 import type { EmitOptions } from '../../options/index.js'
 import type { JSONSchema } from '../../parser/index.js'
 import { effectError, effectErrorPart, makeSafeKey } from '../../utils/index.js'
@@ -63,7 +68,7 @@ export function object(
     schema.patternProperties
       ? Object.entries(schema.patternProperties).map(([pattern, propSchema]) => {
           const s = effect(propSchema, rootName, isEffect, options)
-          return `Schema.makeFilter((input)=>Object.entries(input).every(([key,value])=>!new RegExp(${JSON.stringify(pattern)}).test(key)||Schema.is(${s})(value))${patternErrorArg})`
+          return `Schema.makeFilter((input)=>Object.entries(input).every(([key,value])=>!new RegExp(${JSON.stringify(pattern)}).test(key)||Schema.is(Schema.toEncoded(${s}))(value))${patternErrorArg})`
         })
       : []
 
@@ -74,7 +79,16 @@ export function object(
     return checks.length > 0 ? `${record}.check(${checks.join(',')})` : record
   }
 
-  if (!schema.properties) {
+  const properties = schema.properties ?? {}
+  // A required key no property declares only has to be present.
+  const undeclaredRequired = (schema.required ?? []).filter(
+    (key) => !Object.hasOwn(properties, key),
+  )
+  const unevaluated = schema.unevaluatedProperties
+  const closed = schema.additionalProperties === false || unevaluated === false
+  const unevaluatedSchema = typeof unevaluated === 'object' ? unevaluated : undefined
+  const checksKeys = undeclaredRequired.length > 0 || unevaluatedSchema !== undefined || closed
+  if (!schema.properties && !checksKeys) {
     // v3.2: patternProperties without properties → unknown-typed Record + filter.
     if (schema.patternProperties) {
       const record = 'Schema.Record(Schema.String,Schema.Unknown)'
@@ -86,7 +100,7 @@ export function object(
   }
 
   const required = new Set(schema.required)
-  const props = Object.entries(schema.properties)
+  const props = Object.entries(properties)
     .map(([key, propSchema]) => {
       const parsed = effect(
         propSchema,
@@ -106,12 +120,20 @@ export function object(
     })
     .filter((p) => p !== null)
 
-  // `if`/`then`/`else` sub-schemas may name keys the struct does not declare,
-  // so the object has to keep unknown keys. v4 spells an index signature as
+  // A struct drops the keys it does not declare before a filter sees the value, so a
+  // keyword that reads those keys (`if`/`then`/`else` sub-schemas may name them too) needs
+  // the object to keep them. v4 spells an index signature as
   // `Schema.StructWithRest(struct, [record])`.
-  const conditionalKeysReferenced = hasConditional(schema)
+  const readsUndeclaredKeys =
+    hasConditional(schema) ||
+    schema.patternProperties !== undefined ||
+    schema.propertyNames !== undefined ||
+    schema.minProperties !== undefined ||
+    schema.maxProperties !== undefined ||
+    schema.dependentRequired !== undefined ||
+    checksKeys
   const struct = `Schema.Struct({${props.join(',')}})`
-  const rawBase = conditionalKeysReferenced
+  const rawBase = readsUndeclaredKeys
     ? `Schema.StructWithRest(${struct},[Schema.Record(Schema.String,Schema.Unknown)])`
     : struct
   const propsMessage = schema['x-properties-message']
@@ -139,17 +161,22 @@ export function object(
         return `Schema.makeFilter((input)=>!('${key}' in input)||Schema.is(${s})(input)${depSchErrorArg})`
       })
     : []
-  // Effect Schema enforces strict decoding via the `parseOptions` annotation,
-  // which sets `onExcessProperty: 'error'` at schema level. v4 reports an
-  // unexpected key as its own issue, so the custom message goes on
-  // `messageUnexpectedKey` rather than the node-wide `message`.
-  const isStrictExtras =
-    schema.additionalProperties === false || schema.unevaluatedProperties === false
-  const strictExtrasAnnotation = isStrictExtras
-    ? strictExtrasMessage
-      ? `.annotate({parseOptions:{onExcessProperty:"error"},messageUnexpectedKey:${JSON.stringify(strictExtrasMessage)}})`
-      : `.annotate({parseOptions:{onExcessProperty:"error"}})`
-    : ''
+  const requiredPresentFilter =
+    undeclaredRequired.length > 0
+      ? `Schema.makeFilter((input)=>${JSON.stringify(undeclaredRequired)}.every((key)=>key in input)${errorArg})`
+      : ''
+  // A key no property names and no pattern matches: refused when the object is closed,
+  // held to `unevaluatedProperties` when that is a schema. v4 takes `onExcessProperty`
+  // only as a decoding option, not from the schema, so the struct cannot refuse it itself.
+  const isEvaluated = isEvaluatedKeyExpression(
+    { names: Object.keys(properties), patterns: Object.keys(schema.patternProperties ?? {}) },
+    'key',
+  )
+  const unevaluatedKeysFilter = closed
+    ? `Schema.makeFilter((input)=>Object.keys(input).every((key)=>${isEvaluated})${effectErrorPart(strictExtrasMessage ?? errorMessage)})`
+    : unevaluatedSchema !== undefined
+      ? `Schema.makeFilter((input)=>Object.entries(input).every(([key,value])=>${isEvaluated}||Schema.is(Schema.toEncoded(${effect(unevaluatedSchema, rootName, isEffect, options)}))(value))${effectErrorPart(schema['x-unevaluatedProperties-message'] ?? errorMessage)})`
+      : ''
 
   // v3.2: if/then/else conditional schema. Routed through a filter: when `if`
   // matches, the object must also satisfy `then`; otherwise `else`.
@@ -183,14 +210,16 @@ export function object(
     maxPropertiesFilter,
     propertyNamesFilter(),
     ...patternPropertiesFilters(),
+    requiredPresentFilter,
+    unevaluatedKeysFilter,
     ...dependentRequiredFilters,
     ...dependentSchemasFilters,
     ...ifThenElseFilters,
   ].filter((a) => a !== '')
 
   const checked = checks.length > 0 ? `${partialBase}.check(${checks.join(',')})` : partialBase
-  const objectExpr = `${checked}${strictExtrasAnnotation}`
-  const hasInheritedName = Object.keys(schema.properties).some(isObjectPrototypeProperty)
+  const objectExpr = checked
+  const hasInheritedName = Object.keys(properties).some(isObjectPrototypeProperty)
   return isStringWireLocation(options?.paramIn) && hasInheritedName
     ? effectPreprocess([ownProperties('input')], objectExpr)
     : objectExpr

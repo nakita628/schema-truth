@@ -67,7 +67,7 @@ describe('object', () => {
           'Schema',
           false,
         ),
-      ).toBe('v.pipe(v.object({a:v.string()}),v.check((input)=>Object.keys(input).length>=2))')
+      ).toBe('v.pipe(v.looseObject({a:v.string()}),v.check((input)=>Object.keys(input).length>=2))')
     })
 
     it('emits both with x-minimum-message / x-maximum-message', () => {
@@ -86,7 +86,7 @@ describe('object', () => {
           false,
         ),
       ).toBe(
-        'v.pipe(v.object({a:v.string()}),v.check((input)=>Object.keys(input).length>=1,"too few"),v.check((input)=>Object.keys(input).length<=3,"too many"))',
+        'v.pipe(v.looseObject({a:v.string()}),v.check((input)=>Object.keys(input).length>=1,"too few"),v.check((input)=>Object.keys(input).length<=3,"too many"))',
       )
     })
   })
@@ -105,7 +105,7 @@ describe('object', () => {
           false,
         ),
       ).toBe(
-        'v.pipe(v.object({a:v.string()}),v.check((input)=>Object.keys(input).every((key)=>new RegExp("^[a-z]+$").test(key))))',
+        'v.pipe(v.looseObject({a:v.string()}),v.check((input)=>Object.keys(input).every((key)=>new RegExp("^[a-z]+$").test(key))))',
       )
     })
 
@@ -122,7 +122,7 @@ describe('object', () => {
           false,
         ),
       ).toBe(
-        'v.pipe(v.object({a:v.string()}),v.check((input)=>Object.keys(input).every((key)=>["a","b","c"].includes(key))))',
+        'v.pipe(v.looseObject({a:v.string()}),v.check((input)=>Object.keys(input).every((key)=>["a","b","c"].includes(key))))',
       )
     })
 
@@ -140,7 +140,7 @@ describe('object', () => {
           false,
         ),
       ).toBe(
-        'v.pipe(v.object({a:v.string()}),v.check((input)=>Object.keys(input).every((key)=>new RegExp("^[a-z]+$").test(key)),"lowercase only"))',
+        'v.pipe(v.looseObject({a:v.string()}),v.check((input)=>Object.keys(input).every((key)=>new RegExp("^[a-z]+$").test(key)),"lowercase only"))',
       )
     })
   })
@@ -159,7 +159,7 @@ describe('object', () => {
           false,
         ),
       ).toBe(
-        'v.pipe(v.object({a:v.string()}),v.check((input)=>Object.entries(input).every(([key,value])=>!new RegExp("^x-").test(key)||v.safeParse(v.string(),value).success)))',
+        'v.pipe(v.looseObject({a:v.string()}),v.check((input)=>Object.entries(input).every(([key,value])=>!new RegExp("^x-").test(key)||v.safeParse(v.string(),value).success)))',
       )
     })
 
@@ -197,7 +197,7 @@ describe('object', () => {
           false,
         ),
       ).toBe(
-        "v.pipe(v.object({card:v.string(),billing:v.optional(v.string())}),v.check((input)=>!('card' in input)||('billing' in input)))",
+        "v.pipe(v.looseObject({card:v.string(),billing:v.optional(v.string())}),v.check((input)=>!('card' in input)||('billing' in input)))",
       )
     })
 
@@ -218,7 +218,7 @@ describe('object', () => {
           false,
         ),
       ).toBe(
-        "v.pipe(v.partial(v.object({a:v.string(),b:v.string(),c:v.string()})),v.check((input)=>!('a' in input)||('b' in input&&'c' in input),\"a needs b and c\"))",
+        "v.pipe(v.partial(v.looseObject({a:v.string(),b:v.string(),c:v.string()})),v.check((input)=>!('a' in input)||('b' in input&&'c' in input),\"a needs b and c\"))",
       )
     })
   })

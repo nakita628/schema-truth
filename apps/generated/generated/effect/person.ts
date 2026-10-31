@@ -27,36 +27,73 @@ type _Person = {
   readonly subordinates?: readonly _Person[]
 }
 
-const Animal: Schema.Schema<_Animal> = Schema.Struct({
-  name: Schema.String,
-  species: Schema.String,
-  offspring: Schema.optional(Schema.Array(Schema.suspend(() => Animal))),
-}).annotate({ parseOptions: { onExcessProperty: 'error' } })
+const Animal: Schema.Schema<_Animal> = Schema.StructWithRest(
+  Schema.Struct({
+    name: Schema.String,
+    species: Schema.String,
+    offspring: Schema.optional(Schema.Array(Schema.suspend(() => Animal))),
+  }),
+  [Schema.Record(Schema.String, Schema.Unknown)],
+).check(
+  Schema.makeFilter((input) =>
+    Object.keys(input).every((key) => ['name', 'species', 'offspring'].includes(key)),
+  ),
+)
 
-const Comment: Schema.Schema<_Comment> = Schema.Struct({
-  author: Schema.String,
-  text: Schema.String,
-  replies: Schema.optional(Schema.Array(Schema.suspend(() => Comment))),
-}).annotate({ parseOptions: { onExcessProperty: 'error' } })
+const Comment: Schema.Schema<_Comment> = Schema.StructWithRest(
+  Schema.Struct({
+    author: Schema.String,
+    text: Schema.String,
+    replies: Schema.optional(Schema.Array(Schema.suspend(() => Comment))),
+  }),
+  [Schema.Record(Schema.String, Schema.Unknown)],
+).check(
+  Schema.makeFilter((input) =>
+    Object.keys(input).every((key) => ['author', 'text', 'replies'].includes(key)),
+  ),
+)
 
-const Folder: Schema.Schema<_Folder> = Schema.Struct({
-  name: Schema.String,
-  children: Schema.optional(Schema.Array(Schema.suspend(() => Folder))),
-}).annotate({ parseOptions: { onExcessProperty: 'error' } })
+const Folder: Schema.Schema<_Folder> = Schema.StructWithRest(
+  Schema.Struct({
+    name: Schema.String,
+    children: Schema.optional(Schema.Array(Schema.suspend(() => Folder))),
+  }),
+  [Schema.Record(Schema.String, Schema.Unknown)],
+).check(
+  Schema.makeFilter((input) =>
+    Object.keys(input).every((key) => ['name', 'children'].includes(key)),
+  ),
+)
 
-const Person: Schema.Schema<_Person> = Schema.Struct({
-  name: Schema.String,
-  position: Schema.String,
-  subordinates: Schema.optional(Schema.Array(Schema.suspend(() => Person))),
-}).annotate({ parseOptions: { onExcessProperty: 'error' } })
+const Person: Schema.Schema<_Person> = Schema.StructWithRest(
+  Schema.Struct({
+    name: Schema.String,
+    position: Schema.String,
+    subordinates: Schema.optional(Schema.Array(Schema.suspend(() => Person))),
+  }),
+  [Schema.Record(Schema.String, Schema.Unknown)],
+).check(
+  Schema.makeFilter((input) =>
+    Object.keys(input).every((key) => ['name', 'position', 'subordinates'].includes(key)),
+  ),
+)
 
-export const SelfReferencingEntities: Schema.Schema<_SelfReferencingEntities> = Schema.Struct({
-  animal: Schema.optional(Schema.suspend(() => Animal)),
-  person: Schema.optional(Schema.suspend(() => Person)),
-  folder: Schema.optional(Schema.suspend(() => Folder)),
-  comment: Schema.optional(Schema.suspend(() => Comment)),
-})
-  .annotate({ parseOptions: { onExcessProperty: 'error' } })
-  .annotate({
-    description: 'Examples of animal, person, folder, and comment structures with self-references.',
-  })
+export const SelfReferencingEntities: Schema.Schema<_SelfReferencingEntities> =
+  Schema.StructWithRest(
+    Schema.Struct({
+      animal: Schema.optional(Schema.suspend(() => Animal)),
+      person: Schema.optional(Schema.suspend(() => Person)),
+      folder: Schema.optional(Schema.suspend(() => Folder)),
+      comment: Schema.optional(Schema.suspend(() => Comment)),
+    }),
+    [Schema.Record(Schema.String, Schema.Unknown)],
+  )
+    .check(
+      Schema.makeFilter((input) =>
+        Object.keys(input).every((key) => ['animal', 'person', 'folder', 'comment'].includes(key)),
+      ),
+    )
+    .annotate({
+      description:
+        'Examples of animal, person, folder, and comment structures with self-references.',
+    })

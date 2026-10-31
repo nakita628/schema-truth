@@ -18,6 +18,28 @@ export const Doc: Schema.Schema<_Doc> = Schema.Unknown.check(
   Schema.makeFilter(
     (input) =>
       Schema.is(
+        Schema.StructWithRest(
+          Schema.Struct({
+            a: Schema.optional(Schema.String),
+            list: Schema.optional(
+              Schema.Array(Schema.Struct({})).check(
+                Schema.makeFilter(
+                  (input) =>
+                    input.filter((item) => Schema.is(Schema.suspend(() => Base))(item)).length >= 1,
+                ),
+              ),
+            ),
+            kind: Schema.optional(Schema.String),
+          }),
+          [Schema.Record(Schema.String, Schema.Unknown)],
+        ),
+      )(input),
+    { message: 'bad doc' },
+  ),
+)
+  .pipe(
+    Schema.decodeTo(
+      Schema.StructWithRest(
         Schema.Struct({
           a: Schema.optional(Schema.String),
           list: Schema.optional(
@@ -30,31 +52,24 @@ export const Doc: Schema.Schema<_Doc> = Schema.Unknown.check(
           ),
           kind: Schema.optional(Schema.String),
         }),
-      )(input),
-    { message: 'bad doc' },
-  ),
-)
-  .pipe(
-    Schema.decodeTo(
-      Schema.Struct({
-        a: Schema.optional(Schema.String),
-        list: Schema.optional(
-          Schema.Array(Schema.Struct({})).check(
-            Schema.makeFilter(
-              (input) =>
-                input.filter((item) => Schema.is(Schema.suspend(() => Base))(item)).length >= 1,
-            ),
-          ),
-        ),
-        kind: Schema.optional(Schema.String),
-      }),
+        [Schema.Record(Schema.String, Schema.Unknown)],
+      ),
     ),
   )
   .check(
     Schema.makeFilter((input) =>
       Object.entries(input).every(
         ([key, value]) =>
-          !new RegExp('^p-').test(key) || Schema.is(Schema.suspend(() => Base))(value),
+          !new RegExp('^p-').test(key) ||
+          Schema.is(Schema.toEncoded(Schema.suspend(() => Base)))(value),
+      ),
+    ),
+    Schema.makeFilter((input) =>
+      Object.entries(input).every(
+        ([key, value]) =>
+          ['a', 'list', 'kind'].includes(key) ||
+          new RegExp('^p-').test(key) ||
+          Schema.is(Schema.toEncoded(Schema.suspend(() => Base)))(value),
       ),
     ),
     Schema.makeFilter(

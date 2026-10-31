@@ -260,14 +260,28 @@ export function typebox(
     if (schemas.length === 0) {
       return typeboxWrap(tbPrim('Type.Any', schema, [], hostRef), { ...schema, nullable })
     }
-    // TypeBox evaluates `unevaluatedProperties` across the intersection itself.
+    // TypeBox evaluates `patternProperties` and `unevaluatedProperties` across the
+    // intersection itself.
     const unevaluated = schema.unevaluatedProperties
-    const unevaluatedOpt =
-      unevaluated === false
+    const patternOpt =
+      schema.patternProperties === undefined
+        ? []
+        : [
+            `patternProperties:{${Object.entries(schema.patternProperties)
+              .map(
+                ([pattern, propSchema]) =>
+                  `${JSON.stringify(pattern)}:${typebox(propSchema, rootName, isTypebox, childOptions)}`,
+              )
+              .join(',')}}`,
+          ]
+    const unevaluatedOpt = [
+      ...patternOpt,
+      ...(unevaluated === false
         ? ['unevaluatedProperties:false']
         : typeof unevaluated === 'object' && unevaluated !== null
           ? [`unevaluatedProperties:${typebox(unevaluated, rootName, isTypebox, childOptions)}`]
-          : []
+          : []),
+    ]
     // A `default` beside `allOf`, or in a default-only member, is checked against the
     // members and carried on the `Type.Intersect` (a one-member intersection is the
     // member itself): TypeBox v1's `Type.Optional` takes no default of its own.

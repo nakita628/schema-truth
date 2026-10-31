@@ -63,18 +63,25 @@ export function object(
   }
 
   const required = new Set(schema.required)
-  const props = Object.entries(schema.properties)
-    .map(([key, propSchema]) => {
-      const parsed = typebox(propSchema, rootName, isTypebox, childOptions)
-      if (!parsed) return null
-      const safeKey = makeSafeKey(key)
-      // A property with a default is already `Type.Optional` from its own emitter, so it
-      // is not wrapped a second time.
-      return required.has(key) || isOptionalByDefault(propSchema, options?.definitions)
-        ? `${safeKey}:${parsed}`
-        : `${safeKey}:Type.Optional(${parsed})`
-    })
-    .filter((p) => p !== null)
+  // A required key no property declares only has to be present, with any value.
+  const undeclaredRequired = (schema.required ?? [])
+    .filter((key) => !Object.hasOwn(schema.properties ?? {}, key))
+    .map((key) => `${makeSafeKey(key)}:Type.Unknown()`)
+  const props = [
+    ...Object.entries(schema.properties)
+      .map(([key, propSchema]) => {
+        const parsed = typebox(propSchema, rootName, isTypebox, childOptions)
+        if (!parsed) return null
+        const safeKey = makeSafeKey(key)
+        // A property with a default is already `Type.Optional` from its own emitter, so it
+        // is not wrapped a second time.
+        return required.has(key) || isOptionalByDefault(propSchema, options?.definitions)
+          ? `${safeKey}:${parsed}`
+          : `${safeKey}:Type.Optional(${parsed})`
+      })
+      .filter((p) => p !== null),
+    ...undeclaredRequired,
+  ]
 
   // v3.0: aggregate all v3.0 object-related x-*-message extensions
   // into a single ajv-errors–compatible `errorMessage` annotation.
@@ -191,6 +198,14 @@ function buildAdvancedOpts(
     !schema.properties && Array.isArray(schema.required) && schema.required.length > 0
       ? `required:${JSON.stringify(schema.required)}`
       : undefined
+  // TypeBox evaluates `unevaluatedProperties` itself, against `properties` and the patterns.
+  const unevaluated = schema.unevaluatedProperties
+  const unevaluatedOpt =
+    unevaluated === false
+      ? 'unevaluatedProperties:false'
+      : typeof unevaluated === 'object'
+        ? `unevaluatedProperties:${typebox(unevaluated, rootName, isTypebox, options)}`
+        : undefined
   return [
     typeof schema.minProperties === 'number' ? `minProperties:${schema.minProperties}` : undefined,
     typeof schema.maxProperties === 'number' ? `maxProperties:${schema.maxProperties}` : undefined,
@@ -201,5 +216,6 @@ function buildAdvancedOpts(
     thenOpt,
     elseOpt,
     requiredOpt,
+    unevaluatedOpt,
   ]
 }

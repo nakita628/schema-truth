@@ -17,7 +17,7 @@ export const Doc: v.GenericSchema<unknown, _Doc> = v.pipe(
       if (!dataset.typed) return
       const result = v.safeParse(
         v.partial(
-          v.object({
+          v.looseObject({
             a: v.string(),
             list: v.pipe(
               v.array(v.object({})),
@@ -48,7 +48,7 @@ export const Doc: v.GenericSchema<unknown, _Doc> = v.pipe(
       }
     }),
     v.partial(
-      v.object({
+      v.looseObject({
         a: v.string(),
         list: v.pipe(
           v.array(v.object({})),
@@ -71,6 +71,17 @@ export const Doc: v.GenericSchema<unknown, _Doc> = v.pipe(
     Object.entries(input).every(
       ([key, value]) =>
         !new RegExp('^p-').test(key) ||
+        v.safeParse(
+          v.lazy(() => Base),
+          value,
+        ).success,
+    ),
+  ),
+  v.check((input) =>
+    Object.entries(input).every(
+      ([key, value]) =>
+        ['a', 'list', 'kind'].includes(key) ||
+        new RegExp('^p-').test(key) ||
         v.safeParse(
           v.lazy(() => Base),
           value,
