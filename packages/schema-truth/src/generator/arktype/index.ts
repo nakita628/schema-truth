@@ -51,8 +51,12 @@ export function schemaToArktype(input: JSONSchema, options?: GenerateOptions): s
     // Entries may call `type(...)` — `arktypeWrap` reaches for it whenever a
     // bare definition needs a method such as `.describe()` — or read `type.errors`
     // in a wire union, so the import has to carry it alongside `scope`.
-    const scopeBody = `const types = scope({${scopeEntries.join(',')}}).export()`
-    const usesType = /\btype[(.]/u.test(scopeBody)
+    // A callback that checks a value against a definition reaches it through the scope.
+    const entries = scopeEntries.join(',')
+    const scopeBody = entries.includes('$.type(')
+      ? `const $ = scope({${entries}})\n\nconst types = $.export()`
+      : `const types = scope({${entries}}).export()`
+    const usesType = /(?<![\w$.])type[(.]/u.test(scopeBody)
 
     return [
       ...prefix,

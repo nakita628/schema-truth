@@ -284,7 +284,7 @@ describe('object dependent / unevaluated / conditional keywords', () => {
         properties: { a: { type: 'string' } },
         unevaluatedProperties: { type: 'string' },
       },
-      'type({"a?":"string"}).narrow((data) => Object.entries(data).filter(([key]) => !["a"].includes(key)).every(([, value]) => type("string").allows(value)))',
+      'type({"a?":"string"}).narrow((data) => Object.entries(data).every(([key, value]) => ["a"].includes(key) || type("string").allows(value)))',
     ],
     [
       { type: 'object', properties: { a: { type: 'string' } }, unevaluatedProperties: true },
@@ -380,7 +380,7 @@ describe('object dependent / unevaluated / conditional keywords', () => {
     ).toBe('type({a:"string"}).describe("P")')
   })
 
-  it('wraps bare literal with type() for x-properties-message when isArktype', () => {
+  it('describes a bare literal with an "@" tuple for x-properties-message inside a scope', () => {
     expect(
       object(
         {
@@ -392,6 +392,6 @@ describe('object dependent / unevaluated / conditional keywords', () => {
         'Schema',
         true,
       ),
-    ).toBe('type({a:"string"}).describe("P")')
+    ).toBe('[{a:"string"},"@","P"]')
   })
 })

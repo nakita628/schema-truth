@@ -43,6 +43,8 @@ import {
   withoutParameterSerialization,
   evaluatedProperties,
   discriminatedMembers,
+  callbackReturn,
+  callbackType,
 } from '../../helper/index.js'
 import type { ArktypeWrapOptions } from '../../helper/index.js'
 import type { EmitOptions } from '../../options/index.js'
@@ -535,30 +537,47 @@ function node(
         : lengthExpr
     const containsNarrows = ((): readonly string[] => {
       if (!schema.contains) return []
-      const containsRt = asRuntime(arktype(schema.contains, rootName, isArktype, options))
+      const containsRt = callbackType(
+        arktype(schema.contains, rootName, isArktype, options),
+        isArktype,
+      )
       const minC = schema.minContains
       const maxC = schema.maxContains
       if (minC === undefined && maxC === undefined) {
         const msg = containsMessage ?? 'must contain at least one matching item'
         return [
-          `.narrow((data: unknown[], ctx) => data.some((item) => ${containsRt}.allows(item)) || ctx.mustBe(${JSON.stringify(msg)}))`,
+          callbackReturn(
+            '(data: unknown[], ctx)',
+            `data.some((item) => ${containsRt}.allows(item)) || ctx.mustBe(${JSON.stringify(msg)})`,
+          ),
         ]
       }
       const effectiveMin = minC ?? 1
       const minNarrow =
         effectiveMin > 0
-          ? `.narrow((data: unknown[], ctx) => data.filter((item) => ${containsRt}.allows(item)).length >= ${effectiveMin} || ctx.mustBe(${JSON.stringify(minContainsMessage ?? `must contain at least ${effectiveMin} matching items`)}))`
+          ? callbackReturn(
+              '(data: unknown[], ctx)',
+              `data.filter((item) => ${containsRt}.allows(item)).length >= ${effectiveMin} || ctx.mustBe(${JSON.stringify(minContainsMessage ?? `must contain at least ${effectiveMin} matching items`)})`,
+            )
           : undefined
       const maxNarrow =
         maxC !== undefined
-          ? `.narrow((data: unknown[], ctx) => data.filter((item) => ${containsRt}.allows(item)).length <= ${maxC} || ctx.mustBe(${JSON.stringify(maxContainsMessage ?? `must contain at most ${maxC} matching items`)}))`
+          ? callbackReturn(
+              '(data: unknown[], ctx)',
+              `data.filter((item) => ${containsRt}.allows(item)).length <= ${maxC} || ctx.mustBe(${JSON.stringify(maxContainsMessage ?? `must contain at most ${maxC} matching items`)})`,
+            )
           : undefined
       return [minNarrow, maxNarrow].filter((v): v is string => v !== undefined)
     })()
     // unevaluatedItems is handled in the prefixItems branch; with `items` alone,
     // JSON Schema 2020-12 §11.3 makes the keyword redundant.
     const arrayExpr = containsNarrows.reduce(
-      (acc, narrow) => `${asRuntime(acc)}${narrow}`,
+      // Inside a scope a definition keeps its narrows in definition syntax, which the
+      // scope resolves.
+      (acc, narrow) =>
+        isArktype && isArktypeDefinition(acc)
+          ? `[${acc},":",${narrow}]`
+          : `${asRuntime(acc)}.narrow(${narrow})`,
       uniqueExpr,
     )
     return arktypeWrap(wireArray(describeWithMessage(arrayExpr, schema['x-items-message'])), schema)
