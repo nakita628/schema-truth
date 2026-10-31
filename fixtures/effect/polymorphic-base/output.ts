@@ -21,7 +21,7 @@ const KafkaConnection: Schema.Schema<_KafkaConnection> = (() => {
   return Schema.Unknown.pipe(
     Schema.refine(
       (input): input is typeof M0.Type & typeof M1.Type =>
-        Schema.is(M0)(input) && Schema.is(M1)(input),
+        Schema.is(Schema.toEncoded(M0))(input) && Schema.is(Schema.toEncoded(M1))(input),
     ),
   )
 })()

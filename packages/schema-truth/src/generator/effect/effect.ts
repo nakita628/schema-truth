@@ -84,12 +84,13 @@ function intersect(schemas: readonly string[]): string {
     return `Schema.Struct({${schemas.map((s) => `...${s}.fields`).join(',')}})`
   }
   // A `Schema.suspend` takes no check, and a check on a decoded struct no longer sees the
-  // keys the struct strips: the input is tested against every member as it is, and the
-  // refinement says the value has every member's type.
+  // keys the struct strips: the input is tested against every member's encoded side (the
+  // side a default or a bigint is read from), and the refinement says the value has every
+  // member's type.
   if (schemas.some((s) => s.startsWith('Schema.suspend('))) {
     const members = schemas.map((s, i) => `const M${i}=${s}`).join(';')
     const type = schemas.map((_, i) => `typeof M${i}.Type`).join('&')
-    const test = schemas.map((_, i) => `Schema.is(M${i})(input)`).join('&&')
+    const test = schemas.map((_, i) => `Schema.is(Schema.toEncoded(M${i}))(input)`).join('&&')
     return `(()=>{${members};return Schema.Unknown.pipe(Schema.refine((input):input is ${type}=>${test}))})()`
   }
   return `${first}.check(${rest.map((s) => `Schema.makeFilter((input)=>Schema.is(${s})(input))`).join(',')})`
