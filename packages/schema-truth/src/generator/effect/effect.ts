@@ -84,14 +84,17 @@ function intersect(schemas: readonly string[]): string {
     return `Schema.Struct({${schemas.map((s) => `...${s}.fields`).join(',')}})`
   }
   // A `Schema.suspend` takes no check, and a check on a decoded struct no longer sees the
-  // keys the struct strips: the input is tested against every member's encoded side (the
-  // side a default or a bigint is read from), and the refinement says the value has every
-  // member's type.
+  // keys the struct strips: the input is decoded through every member and the decoded
+  // objects are merged, so each member's defaults and conversions apply. The declared
+  // schema says the value has every member's type.
   if (schemas.some((s) => s.startsWith('Schema.suspend('))) {
     const members = schemas.map((s, i) => `const M${i}=${s}`).join(';')
     const type = schemas.map((_, i) => `typeof M${i}.Type`).join('&')
-    const test = schemas.map((_, i) => `Schema.is(Schema.toEncoded(M${i}))(input)`).join('&&')
-    return `(()=>{${members};return Schema.Unknown.pipe(Schema.refine((input):input is ${type}=>${test}))})()`
+    const test = schemas.map((_, i) => `Schema.is(M${i})(input)`).join('&&')
+    const decoded = schemas.map((_, i) => `Schema.decodeUnknownEffect(M${i})(input)`).join(',')
+    const merge = `(values)=>{const merged=values.every((value)=>typeof value==='object'&&value!==null&&!Array.isArray(value))?Object.assign({},...values):values[0];return isAll(merged)?Effect.succeed(merged):Effect.fail(new SchemaIssue.InvalidValue(undefined,merged))}`
+    const decode = `SchemaGetter.transformEffect((input)=>Effect.all([${decoded}]).pipe(Effect.mapError((error)=>error.issue),Effect.flatMap(${merge})))`
+    return `(()=>{${members};const isAll=(input:unknown):input is ${type}=>${test};return Schema.Unknown.pipe(Schema.decodeTo(Schema.declare(isAll),{decode:${decode},encode:SchemaGetter.passthrough({strict:false})}))})()`
   }
   return `${first}.check(${rest.map((s) => `Schema.makeFilter((input)=>Schema.is(${s})(input))`).join(',')})`
 }

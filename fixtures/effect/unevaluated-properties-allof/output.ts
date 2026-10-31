@@ -1,4 +1,4 @@
-import { Schema } from 'effect'
+import { Effect, Schema, SchemaGetter, SchemaIssue } from 'effect'
 
 type _Bucket = _Base & { readonly doc_count: number }
 
@@ -21,11 +21,30 @@ export const Bucket: Schema.Schema<_Bucket> = Schema.Unknown.check(
     (() => {
       const M0 = Schema.suspend(() => Base)
       const M1 = Schema.Struct({ doc_count: Schema.Number.check(Schema.isInt()) })
+      const isAll = (input: unknown): input is typeof M0.Type & typeof M1.Type =>
+        Schema.is(M0)(input) && Schema.is(M1)(input)
       return Schema.Unknown.pipe(
-        Schema.refine(
-          (input): input is typeof M0.Type & typeof M1.Type =>
-            Schema.is(Schema.toEncoded(M0))(input) && Schema.is(Schema.toEncoded(M1))(input),
-        ),
+        Schema.decodeTo(Schema.declare(isAll), {
+          decode: SchemaGetter.transformEffect((input) =>
+            Effect.all([
+              Schema.decodeUnknownEffect(M0)(input),
+              Schema.decodeUnknownEffect(M1)(input),
+            ]).pipe(
+              Effect.mapError((error) => error.issue),
+              Effect.flatMap((values) => {
+                const merged = values.every(
+                  (value) => typeof value === 'object' && value !== null && !Array.isArray(value),
+                )
+                  ? Object.assign({}, ...values)
+                  : values[0]
+                return isAll(merged)
+                  ? Effect.succeed(merged)
+                  : Effect.fail(new SchemaIssue.InvalidValue(undefined, merged))
+              }),
+            ),
+          ),
+          encode: SchemaGetter.passthrough({ strict: false }),
+        }),
       )
     })(),
   ),
