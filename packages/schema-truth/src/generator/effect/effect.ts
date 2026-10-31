@@ -34,11 +34,12 @@ import {
   withoutParameterSerialization,
   evaluatedProperties,
   isEvaluatedKeyExpression,
+  discriminatedMembers,
 } from '../../helper/index.js'
 import type { EffectWrapOptions } from '../../helper/index.js'
 import type { EmitOptions } from '../../options/index.js'
 import type { JSONSchema } from '../../parser/index.js'
-import { effectError, effectErrorPart, normalizeTypes } from '../../utils/index.js'
+import { effectError, effectErrorPart, makeSafeKey, normalizeTypes } from '../../utils/index.js'
 import { _enum } from './enum.js'
 import { int64Input, integer, isInt64 } from './integer.js'
 import { number, wireNumericInput } from './number.js'
@@ -229,7 +230,22 @@ function node(
 
   if (schema.oneOf) {
     if (schema.oneOf.length === 0) return effectWrap('Schema.Unknown', schema)
-    const schemas = schema.oneOf.map((s) => effect(s, rootName, isEffect, options))
+    // A referenced member is held to the discriminator values that select it, so members
+    // that overlap (subtypes of one base) do not both match.
+    const discriminated = discriminatedMembers(schema, schema.oneOf)
+    const schemas = schema.oneOf.map((s, i) => {
+      const member = effect(s, rootName, isEffect, options)
+      const values = discriminated?.members[i]?.values
+      if (discriminated === undefined || values === undefined) return member
+      const literal =
+        values.length === 1
+          ? `Schema.Literal(${JSON.stringify(values[0])})`
+          : `Schema.Literals(${JSON.stringify(values)})`
+      return intersect([
+        member,
+        `Schema.Struct({${makeSafeKey(discriminated.propertyName)}:${literal}})`,
+      ])
+    })
     const oneOfMessage = schema['x-oneOf-message']
     const expr = `Schema.Union([${schemas.join(',')}])`
     return effectWrap(

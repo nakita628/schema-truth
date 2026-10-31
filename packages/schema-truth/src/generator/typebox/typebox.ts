@@ -20,11 +20,12 @@ import {
   stringboolPattern,
   stringboolTruthyPattern,
   typeboxWrap,
+  discriminatedMembers,
 } from '../../helper/index.js'
 import type { SchemaDefinitions } from '../../helper/index.js'
 import { typeboxDefaultOpt, typeboxMetaOpts, typeboxRefOpt } from '../../helper/meta.js'
 import type { JSONSchema, ParamIn } from '../../parser/index.js'
-import { normalizeTypes, resolveOpenAPIRef } from '../../utils/index.js'
+import { makeSafeKey, normalizeTypes, resolveOpenAPIRef } from '../../utils/index.js'
 import { _enum } from './enum.js'
 import { integer } from './integer.js'
 import { number } from './number.js'
@@ -193,9 +194,9 @@ export function typebox(
     // schema is shared, so its own options cannot carry it.
     const withDefault = (s: JSONSchema): string => {
       const defaultOpt = typeboxDefaultOpt(s, false, definitions)
-      const named = ref(s)
+      const target = ref(s)
       const inner =
-        defaultOpt.length === 0 ? named : `Type.Intersect([${named}],{${defaultOpt.join(',')}})`
+        defaultOpt.length === 0 ? target : `Type.Intersect([${target}],{${defaultOpt.join(',')}})`
       return typeboxWrap(inner, s, definitions)
     }
     const items = itemsSchemaOf(schema.items)
@@ -209,7 +210,17 @@ export function typebox(
     if (schema.oneOf.length === 0) {
       return typeboxWrap(tbPrim('Type.Any', schema, [], hostRef), schema)
     }
-    const schemas = schema.oneOf.map((s) => typebox(s, rootName, isTypebox, childOptions))
+    // A referenced member is held to the discriminator values that select it, so members
+    // that overlap (subtypes of one base) do not both match.
+    const discriminated = discriminatedMembers(schema, schema.oneOf)
+    const schemas = schema.oneOf.map((s, i) => {
+      const member = typebox(s, rootName, isTypebox, childOptions)
+      const values = discriminated?.members[i]?.values
+      if (discriminated === undefined || values === undefined) return member
+      const literals = values.map((value) => `Type.Literal(${JSON.stringify(value)})`)
+      const literal = literals.length === 1 ? literals[0] : `Type.Union([${literals.join(',')}])`
+      return `Type.Intersect([${member},Type.Object({${makeSafeKey(discriminated.propertyName)}:${literal}})])`
+    })
     return typeboxWrap(
       tbComp(
         'Type.Union',

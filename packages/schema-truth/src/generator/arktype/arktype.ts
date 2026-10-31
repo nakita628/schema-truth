@@ -42,6 +42,7 @@ import {
   wireNumericKind,
   withoutParameterSerialization,
   evaluatedProperties,
+  discriminatedMembers,
 } from '../../helper/index.js'
 import type { ArktypeWrapOptions } from '../../helper/index.js'
 import type { EmitOptions } from '../../options/index.js'
@@ -162,11 +163,11 @@ function unevaluatedPropertiesMember(
   const value =
     unevaluated === false ? '"never"' : arktype(unevaluated, rootName, isArktype, options)
   const names = evaluated.names.map((name) => name.replaceAll(/[\\^$.*+?()[\]{}|/]/gu, '\\$&'))
-  const lookaheads = [
+  const exclusions = [
     ...(names.length === 0 ? [] : [`(?!(?:${names.join('|')})$)`]),
     ...evaluated.patterns.map((pattern) => `(?![\\s\\S]*?(?:${pattern.replaceAll('/', '\\/')}))`),
   ]
-  return `{${JSON.stringify(`[/^${lookaheads.join('')}/]`)}:${value}}`
+  return `{${JSON.stringify(`[/^${exclusions.join('')}/]`)}:${value}}`
 }
 
 /**
@@ -278,7 +279,19 @@ function node(
 
   if (schema.oneOf) {
     if (schema.oneOf.length === 0) return arktypeWrap('"unknown"', schema)
-    const schemas = schema.oneOf.map((s) => arktype(s, rootName, isArktype, options))
+    // A referenced member is held to the discriminator values that select it, so members
+    // that overlap (subtypes of one base) do not both match.
+    const discriminated = discriminatedMembers(schema, schema.oneOf)
+    const schemas = schema.oneOf.map((s, i) => {
+      const member = arktype(s, rootName, isArktype, options)
+      const values = discriminated?.members[i]?.values
+      if (discriminated === undefined || values === undefined) return member
+      const literal = values.map((value) => `'${value.replaceAll(/['\\]/gu, '\\$&')}'`).join(' | ')
+      return intersectionStr(
+        [member, `{${JSON.stringify(discriminated.propertyName)}:${JSON.stringify(literal)}}`],
+        isArktype,
+      )
+    })
     return arktypeWrap(unionOf(schemas, schema['x-oneOf-message']), schema)
   }
 

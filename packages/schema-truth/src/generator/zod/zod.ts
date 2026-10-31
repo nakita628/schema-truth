@@ -11,6 +11,7 @@ import {
 import {
   constraintMessage,
   constraintPredicate,
+  discriminatedMembers,
   evaluatedProperties,
   foldAllOfMembers,
   impliedWireType,
@@ -35,6 +36,7 @@ import type { EmitOptions } from '../../options/index.js'
 import type { JSONSchema } from '../../parser/index.js'
 import {
   issueMessageExpression,
+  makeSafeKey,
   normalizeTypes,
   zodError,
   zodErrorPart,
@@ -201,13 +203,25 @@ function node(
 
   if (schema.oneOf) {
     if (schema.oneOf.length === 0) return zodWrap('z.any()', schema)
-    const schemas = schema.oneOf.map((s) => zod(s, rootName, isZod, options))
-    const oneOfMessage = schema['x-oneOf-message']
-    const errorPart = zodErrorPart(oneOfMessage)
     const discriminator = schema.discriminator?.propertyName
     // ZodIntersection (from allOf) is not compatible with discriminatedUnion, so
     // fall back to xor when oneOf contains a $ref or allOf member.
     const hasRefOrAllOf = schema.oneOf.some((s) => s.$ref !== undefined || s.allOf !== undefined)
+    // A referenced member is held to the discriminator values that select it, so members
+    // that overlap (subtypes of one base) do not both match.
+    const discriminated = hasRefOrAllOf ? discriminatedMembers(schema, schema.oneOf) : undefined
+    const schemas = schema.oneOf.map((s, i) => {
+      const member = zod(s, rootName, isZod, options)
+      const values = discriminated?.members[i]?.values
+      if (discriminated === undefined || values === undefined) return member
+      const literal =
+        values.length === 1
+          ? `z.literal(${JSON.stringify(values[0])})`
+          : `z.enum(${JSON.stringify(values)})`
+      return `z.intersection(${member},z.object({${makeSafeKey(discriminated.propertyName)}:${literal}}))`
+    })
+    const oneOfMessage = schema['x-oneOf-message']
+    const errorPart = zodErrorPart(oneOfMessage)
     // The text `1` is both a number and a stringbool once coerced, so on the wire the
     // first member that reads it wins rather than every match failing the other.
     const z =

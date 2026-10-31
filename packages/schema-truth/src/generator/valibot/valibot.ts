@@ -36,6 +36,7 @@ import {
   withoutParameterSerialization,
   evaluatedProperties,
   isEvaluatedKeyExpression,
+  discriminatedMembers,
 } from '../../helper/index.js'
 import type { ValibotWrapOptions } from '../../helper/index.js'
 import type { EmitOptions } from '../../options/index.js'
@@ -45,6 +46,7 @@ import {
   normalizeTypes,
   valibotError,
   valibotErrorPart,
+  makeSafeKey,
 } from '../../utils/index.js'
 import { _enum } from './enum.js'
 import { int64Input, integer, isInt64 } from './integer.js'
@@ -218,11 +220,23 @@ function node(
 
   if (schema.oneOf) {
     if (schema.oneOf.length === 0) return valibotWrap('v.any()', schema)
-    const schemas = schema.oneOf.map((s) => valibot(s, rootName, isValibot, options))
-    const oneOfMessage = schema['x-oneOf-message']
-    const errorPart = valibotErrorPart(oneOfMessage)
     const discriminator = schema.discriminator?.propertyName
     const hasRefOrAllOf = schema.oneOf.some((s) => s.$ref !== undefined || s.allOf !== undefined)
+    // A referenced member is held to the discriminator values that select it, so members
+    // that overlap (subtypes of one base) do not both match.
+    const discriminated = hasRefOrAllOf ? discriminatedMembers(schema, schema.oneOf) : undefined
+    const schemas = schema.oneOf.map((s, i) => {
+      const member = valibot(s, rootName, isValibot, options)
+      const values = discriminated?.members[i]?.values
+      if (discriminated === undefined || values === undefined) return member
+      const literal =
+        values.length === 1
+          ? `v.literal(${JSON.stringify(values[0])})`
+          : `v.picklist(${JSON.stringify(values)})`
+      return `v.intersect([${member},v.object({${makeSafeKey(discriminated.propertyName)}:${literal}})])`
+    })
+    const oneOfMessage = schema['x-oneOf-message']
+    const errorPart = valibotErrorPart(oneOfMessage)
     const expr =
       discriminator && !hasRefOrAllOf
         ? `v.variant('${discriminator}',[${schemas.join(',')}]${errorPart})`

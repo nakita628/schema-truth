@@ -12,7 +12,10 @@ const KafkaConnection = Type.Intersect([
 
 const SampleConnection = ConnectionBase
 
-const Connection = Type.Union([SampleConnection, KafkaConnection])
+const Connection = Type.Union([
+  Type.Intersect([SampleConnection, Type.Object({ type: Type.Literal('Sample') })]),
+  Type.Intersect([KafkaConnection, Type.Object({ type: Type.Literal('Kafka') })]),
+])
 
 export const Connections = Type.Array(Connection)
 

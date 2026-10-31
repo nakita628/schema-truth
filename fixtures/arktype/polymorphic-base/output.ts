@@ -4,7 +4,11 @@ const types = scope({
   ConnectionBase: { 'name?': 'string', 'type?': "'Sample' | 'Kafka'" },
   KafkaConnection: ['ConnectionBase', '&', { 'bootstrapServers?': 'string' }],
   SampleConnection: 'ConnectionBase',
-  Connection: 'SampleConnection | KafkaConnection',
+  Connection: [
+    ['SampleConnection', '&', { type: "'Sample'" }],
+    '|',
+    ['KafkaConnection', '&', { type: "'Kafka'" }],
+  ],
   Connections: 'Connection[]',
 }).export()
 
