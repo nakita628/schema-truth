@@ -4,6 +4,26 @@ import { readCodeExtension } from './code-extensions.js'
 import type { CodeExtensionOptions } from './code-extensions.js'
 
 /**
+ * A definition a callback checks values against at validation time. Inside
+ * `scope({...})` it goes through the scope (bound to `$`), which resolves the aliases
+ * it may name; the global `type(...)` cannot. An expression that already evaluates to a
+ * `Type` is used as it is.
+ */
+export function callbackType(source: string, scopeMode: boolean): string {
+  if (scopeMode) return isArktypeDefinition(source) ? `$.type(${source})` : source
+  return isQuoted(source) ? `type(${source})` : source
+}
+
+/**
+ * A callback that reaches the scope through `$`: its return type is spelled out, since
+ * `$` is still being declared where the callback is written and TypeScript would
+ * otherwise infer the scope's type from itself.
+ */
+export function callbackReturn(params: string, body: string): string {
+  return `${params}${body.includes('$.type(') ? ': boolean' : ''} => ${body}`
+}
+
+/**
  * Options accepted by {@link arktypeWrap}.
  *
  * `scopeMode` marks output that is being emitted inside `scope({...})`. There,

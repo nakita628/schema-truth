@@ -36,6 +36,7 @@ import {
   withoutParameterSerialization,
   evaluatedProperties,
   isEvaluatedKeyExpression,
+  discriminatedMembers,
 } from '../../helper/index.js'
 import type { ValibotWrapOptions } from '../../helper/index.js'
 import type { EmitOptions } from '../../options/index.js'
@@ -45,6 +46,7 @@ import {
   normalizeTypes,
   valibotError,
   valibotErrorPart,
+  makeSafeKey,
 } from '../../utils/index.js'
 import { _enum } from './enum.js'
 import { int64Input, integer, isInt64 } from './integer.js'
@@ -95,34 +97,52 @@ function stringbool(errorArg: string): string {
 
 function elementMessageWrap(inner: string, msg: string) {
   const msgExpr = issueMessageExpression(msg)
-  return `v.pipe(v.unknown(),v.rawCheck(({dataset,addIssue})=>{if(!dataset.typed)return;const result=v.safeParse(${inner},dataset.value);if(!result.success){for(const issue of result.issues){if(issue.path&&issue.path.length>0){addIssue({message:${msgExpr},path:issue.path})}else{addIssue(issue)}}}}))`
+  return `v.pipe(v.unknown(),v.rawCheck(({dataset,addIssue})=>{if(!dataset.typed)return;const result=v.safeParse(${inner},dataset.value);if(!result.success){for(const issue of result.issues){if(issue.path&&issue.path.length>0){addIssue({message:${msgExpr},path:issue.path})}else{addIssue({message:issue.message})}}}}),${inner})`
+}
+
+/** Add a key's issues (`result`) to the raw check. */
+function forwardKeyIssues(message: string | undefined): string {
+  return `for(const issue of result.issues){addIssue({message:${message === undefined ? 'issue.message' : JSON.stringify(message)}})}`
 }
 
 /**
- * An `allOf` with `unevaluatedProperties` beside it: the members' objects strip what they
- * do not declare, so the keys no member evaluates are checked on the input before it is
- * parsed. `inner` as given when the keyword is absent or every key is evaluated.
+ * An `allOf` with `patternProperties` or `unevaluatedProperties` beside it: the members'
+ * objects strip what they do not declare, so the keys are checked on the input before it
+ * is parsed — a key a pattern matches against that pattern's schema, a key no member
+ * evaluates against `unevaluatedProperties`. `inner` as given when there is nothing to check.
  */
-function unevaluatedPropertiesCheck(
+function objectKeysCheck(
   inner: string,
   schema: JSONSchema,
   rootName: string,
   isValibot: boolean,
   options: EmitOptions | undefined,
 ): string {
+  const patterns = Object.entries(schema.patternProperties ?? {})
   const unevaluated = schema.unevaluatedProperties
-  if (unevaluated !== false && (typeof unevaluated !== 'object' || unevaluated === null)) {
-    return inner
-  }
-  const evaluated = evaluatedProperties(schema, options?.definitions)
-  if (evaluated === undefined) return inner
-  const isEvaluated = isEvaluatedKeyExpression(evaluated, 'k')
+  const unevaluatedSchema = typeof unevaluated === 'object' ? unevaluated : undefined
+  const evaluated =
+    unevaluated === false || unevaluatedSchema !== undefined
+      ? evaluatedProperties(schema, options?.definitions)
+      : undefined
+  if (patterns.length === 0 && evaluated === undefined) return inner
+  const patternMessage = schema['x-patternProperties-message']
+  const patternChecks = patterns
+    .map(
+      ([pattern, propSchema]) =>
+        `if(new RegExp(${JSON.stringify(pattern)}).test(k)){const result=v.safeParse(${valibot(propSchema, rootName, isValibot, options)},val);if(!result.success){${forwardKeyIssues(patternMessage)}}}`,
+    )
+    .join('')
   const message = schema['x-unevaluatedProperties-message']
-  const check =
-    unevaluated === false
-      ? `for(const k of Object.keys(o)){if(${isEvaluated})continue;addIssue({message:${message === undefined ? `'Unevaluated property: '+k` : JSON.stringify(message)}})}`
-      : `const Unevaluated=${valibot(unevaluated, rootName, isValibot, options)};for(const [k,val] of Object.entries(o)){if(${isEvaluated})continue;const result=v.safeParse(Unevaluated,val);if(!result.success){for(const issue of result.issues){addIssue({message:${message === undefined ? 'issue.message' : JSON.stringify(message)}})}}}`
-  return `v.pipe(v.unknown(),v.rawCheck(({dataset,addIssue})=>{if(!dataset.typed)return;const o=dataset.value;if(typeof o!=='object'||o===null||Array.isArray(o))return;${check}}),${inner})`
+  const unevaluatedCheck =
+    evaluated === undefined
+      ? ''
+      : `if(!(${isEvaluatedKeyExpression(evaluated, 'k')})){${
+          unevaluatedSchema === undefined
+            ? `addIssue({message:${message === undefined ? `'Unevaluated property: '+k` : JSON.stringify(message)}})`
+            : `const result=v.safeParse(${valibot(unevaluatedSchema, rootName, isValibot, options)},val);if(!result.success){${forwardKeyIssues(message)}}`
+        }}`
+  return `v.pipe(v.unknown(),v.rawCheck(({dataset,addIssue})=>{if(!dataset.typed)return;const o=dataset.value;if(typeof o!=='object'||o===null||Array.isArray(o))return;for(const [k,val] of Object.entries(o)){${patternChecks}${unevaluatedCheck}}}),${inner})`
 }
 
 /**
@@ -218,11 +238,23 @@ function node(
 
   if (schema.oneOf) {
     if (schema.oneOf.length === 0) return valibotWrap('v.any()', schema)
-    const schemas = schema.oneOf.map((s) => valibot(s, rootName, isValibot, options))
-    const oneOfMessage = schema['x-oneOf-message']
-    const errorPart = valibotErrorPart(oneOfMessage)
     const discriminator = schema.discriminator?.propertyName
     const hasRefOrAllOf = schema.oneOf.some((s) => s.$ref !== undefined || s.allOf !== undefined)
+    // A referenced member is held to the discriminator values that select it, so members
+    // that overlap (subtypes of one base) do not both match.
+    const discriminated = hasRefOrAllOf ? discriminatedMembers(schema, schema.oneOf) : undefined
+    const schemas = schema.oneOf.map((s, i) => {
+      const member = valibot(s, rootName, isValibot, options)
+      const values = discriminated?.members[i]?.values
+      if (discriminated === undefined || values === undefined) return member
+      const literal =
+        values.length === 1
+          ? `v.literal(${JSON.stringify(values[0])})`
+          : `v.picklist(${JSON.stringify(values)})`
+      return `v.intersect([${member},v.object({${makeSafeKey(discriminated.propertyName)}:${literal}})])`
+    })
+    const oneOfMessage = schema['x-oneOf-message']
+    const errorPart = valibotErrorPart(oneOfMessage)
     const expr =
       discriminator && !hasRefOrAllOf
         ? `v.variant('${discriminator}',[${schemas.join(',')}]${errorPart})`
@@ -254,10 +286,10 @@ function node(
     const baseResult = allOfMessage
       ? (() => {
           const msgExpr = issueMessageExpression(allOfMessage)
-          return `v.pipe(v.unknown(),v.rawCheck(({dataset,addIssue})=>{if(!dataset.typed)return;const result=v.safeParse(${intersected},dataset.value);if(!result.success){for(const issue of result.issues){addIssue({message:${msgExpr},path:issue.path})}}}))`
+          return `v.pipe(v.unknown(),v.rawCheck(({dataset,addIssue})=>{if(!dataset.typed)return;const result=v.safeParse(${intersected},dataset.value);if(!result.success){for(const issue of result.issues){addIssue({message:${msgExpr},path:issue.path})}}}),${intersected})`
         })()
       : intersected
-    const checked = unevaluatedPropertiesCheck(baseResult, schema, rootName, isValibot, options)
+    const checked = objectKeysCheck(baseResult, schema, rootName, isValibot, options)
     if (defaultValue !== undefined) {
       const withNullable = nullable ? `v.nullable(${checked})` : checked
       return `v.optional(${withNullable},${jsLiteral(defaultValue)})`

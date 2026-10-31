@@ -11,6 +11,7 @@ import {
 import {
   constraintMessage,
   constraintPredicate,
+  discriminatedMembers,
   evaluatedProperties,
   foldAllOfMembers,
   impliedWireType,
@@ -35,6 +36,7 @@ import type { EmitOptions } from '../../options/index.js'
 import type { JSONSchema } from '../../parser/index.js'
 import {
   issueMessageExpression,
+  makeSafeKey,
   normalizeTypes,
   zodError,
   zodErrorPart,
@@ -82,9 +84,25 @@ function zodNotPredicate(inner: JSONSchema, parent: JSONSchema): string | undefi
   return undefined
 }
 
+/**
+ * Re-push `issue` into `ctx` with `message`. Each issue code is narrowed first: the union of
+ * parsed issues does not type-check as a raw issue, while each member does.
+ */
+export function forwardIssue(message: string): string {
+  return ZOD_ISSUE_CODES.map(
+    (c, i) =>
+      `${i === 0 ? '' : 'else '}if(issue.code==='${c}'){ctx.issues.push({...issue,input:issue.input,message:${message}})}`,
+  ).join('')
+}
+
+/** A message for the issues under the value (with a path); the root's own issues keep theirs. */
+export function nestedIssueMessageWrap(inner: string, msg: string): string {
+  const msgExpr = `issue.path.length>0?${issueMessageExpression(msg)}:issue.message`
+  return `(()=>{const Schema=${inner};return z.unknown().check((ctx)=>{const result=Schema.safeParse(ctx.value);if(!result.success){for(const issue of result.error.issues){${forwardIssue(msgExpr)}}}}).pipe(Schema)})()`
+}
+
 function elementMessageWrap(inner: string, msg: string) {
-  const msgExpr = issueMessageExpression(msg)
-  return `(()=>{const Schema=${inner};return z.unknown().check((ctx)=>{const result=Schema.safeParse(ctx.value);if(!result.success){for(const issue of result.error.issues){if(issue.path.length>0){ctx.issues.push({...issue,message:${msgExpr}})}else{ctx.issues.push(issue)}}}}).pipe(Schema)})()`
+  return nestedIssueMessageWrap(inner, msg)
 }
 
 /**
@@ -119,31 +137,49 @@ function keywordConstraint(schema: JSONSchema): string {
   return `z.any().refine((val) => ${body}${zodErrorPart(constraintMessage(schema))})`
 }
 
+/** Push a key's issues (`result`, for the value `v` under key `k`) under that key. */
+function forwardKeyIssues(message: string | undefined): string {
+  return `for(const issue of result.error.issues){ctx.issues.push({code:'custom',input:v,path:[k,...issue.path],message:${message === undefined ? 'issue.message' : JSON.stringify(message)}})}`
+}
+
 /**
- * An `allOf` with `unevaluatedProperties` beside it: the members' objects strip what they
- * do not declare, so the keys no member evaluates are checked on the input before it is
- * parsed. `inner` as given when the keyword is absent or every key is evaluated.
+ * An `allOf` with `patternProperties` or `unevaluatedProperties` beside it: the members'
+ * objects strip what they do not declare, so the keys are checked on the input before it
+ * is parsed — a key a pattern matches against that pattern's schema, a key no member
+ * evaluates against `unevaluatedProperties`. `inner` as given when there is nothing to check.
  */
-function unevaluatedPropertiesCheck(
+function objectKeysCheck(
   inner: string,
   schema: JSONSchema,
   rootName: string,
   isZod: boolean,
   options: EmitOptions | undefined,
 ): string {
+  const patterns = Object.entries(schema.patternProperties ?? {})
   const unevaluated = schema.unevaluatedProperties
-  if (unevaluated !== false && (typeof unevaluated !== 'object' || unevaluated === null)) {
-    return inner
-  }
-  const evaluated = evaluatedProperties(schema, options?.definitions)
-  if (evaluated === undefined) return inner
-  const isEvaluated = isEvaluatedKeyExpression(evaluated, 'k')
+  const unevaluatedSchema = typeof unevaluated === 'object' ? unevaluated : undefined
+  const evaluated =
+    unevaluated === false || unevaluatedSchema !== undefined
+      ? evaluatedProperties(schema, options?.definitions)
+      : undefined
+  if (patterns.length === 0 && evaluated === undefined) return inner
+  const patternMessage = schema['x-patternProperties-message']
+  const patternChecks = patterns
+    .map(
+      ([pattern, propSchema]) =>
+        `if(new RegExp(${JSON.stringify(pattern)}).test(k)){const result=${zod(propSchema, rootName, isZod, options)}.safeParse(v);if(!result.success){${forwardKeyIssues(patternMessage)}}}`,
+    )
+    .join('')
   const message = schema['x-unevaluatedProperties-message']
-  const check =
-    unevaluated === false
-      ? `for(const k of Object.keys(o)){if(${isEvaluated})continue;ctx.issues.push({code:'custom',input:o,path:[k],message:${message === undefined ? '`Unrecognized key: "${k}"`' : JSON.stringify(message)}})}`
-      : `const Unevaluated=${zod(unevaluated, rootName, isZod, options)};for(const [k,v] of Object.entries(o)){if(${isEvaluated})continue;const result=Unevaluated.safeParse(v);if(!result.success){for(const issue of result.error.issues){ctx.issues.push({code:'custom',input:v,path:[k,...issue.path],message:${message === undefined ? 'issue.message' : JSON.stringify(message)}})}}}`
-  return `(()=>{const Schema=${inner};return z.unknown().check((ctx)=>{const o=ctx.value;if(typeof o!=='object'||o===null||Array.isArray(o))return;${check}}).pipe(Schema)})()`
+  const unevaluatedCheck =
+    evaluated === undefined
+      ? ''
+      : `if(!(${isEvaluatedKeyExpression(evaluated, 'k')})){${
+          unevaluatedSchema === undefined
+            ? `ctx.issues.push({code:'custom',input:o,path:[k],message:${message === undefined ? '`Unrecognized key: "${k}"`' : JSON.stringify(message)}})`
+            : `const result=${zod(unevaluatedSchema, rootName, isZod, options)}.safeParse(v);if(!result.success){${forwardKeyIssues(message)}}`
+        }}`
+  return `(()=>{const Schema=${inner};return z.unknown().check((ctx)=>{const o=ctx.value;if(typeof o!=='object'||o===null||Array.isArray(o))return;for(const [k,v] of Object.entries(o)){${patternChecks}${unevaluatedCheck}}}).pipe(Schema)})()`
 }
 
 function node(
@@ -201,13 +237,25 @@ function node(
 
   if (schema.oneOf) {
     if (schema.oneOf.length === 0) return zodWrap('z.any()', schema)
-    const schemas = schema.oneOf.map((s) => zod(s, rootName, isZod, options))
-    const oneOfMessage = schema['x-oneOf-message']
-    const errorPart = zodErrorPart(oneOfMessage)
     const discriminator = schema.discriminator?.propertyName
     // ZodIntersection (from allOf) is not compatible with discriminatedUnion, so
     // fall back to xor when oneOf contains a $ref or allOf member.
     const hasRefOrAllOf = schema.oneOf.some((s) => s.$ref !== undefined || s.allOf !== undefined)
+    // A referenced member is held to the discriminator values that select it, so members
+    // that overlap (subtypes of one base) do not both match.
+    const discriminated = hasRefOrAllOf ? discriminatedMembers(schema, schema.oneOf) : undefined
+    const schemas = schema.oneOf.map((s, i) => {
+      const member = zod(s, rootName, isZod, options)
+      const values = discriminated?.members[i]?.values
+      if (discriminated === undefined || values === undefined) return member
+      const literal =
+        values.length === 1
+          ? `z.literal(${JSON.stringify(values[0])})`
+          : `z.enum(${JSON.stringify(values)})`
+      return `z.intersection(${member},z.object({${makeSafeKey(discriminated.propertyName)}:${literal}}))`
+    })
+    const oneOfMessage = schema['x-oneOf-message']
+    const errorPart = zodErrorPart(oneOfMessage)
     // The text `1` is both a number and a stringbool once coerced, so on the wire the
     // first member that reads it wins rather than every match failing the other.
     const z =
@@ -242,14 +290,11 @@ function node(
     const baseResult = allOfMessage
       ? (() => {
           const msgExpr = issueMessageExpression(allOfMessage)
-          const branches = ZOD_ISSUE_CODES.map(
-            (c, i) =>
-              `${i === 0 ? '' : 'else '}if(issue.code==='${c}'){ctx.issues.push({...issue,input:issue.input,message:${msgExpr}})}`,
-          ).join('')
+          const branches = forwardIssue(msgExpr)
           return `(()=>{const Schema=${intersected};return z.unknown().check((ctx)=>{const result=Schema.safeParse(ctx.value);if(!result.success){for(const issue of result.error.issues){${branches}}}}).pipe(Schema)})()`
         })()
       : intersected
-    const checked = unevaluatedPropertiesCheck(baseResult, schema, rootName, isZod, options)
+    const checked = objectKeysCheck(baseResult, schema, rootName, isZod, options)
     // Carry the default through `merged` so zodWrap applies `.nullable()` before
     // `.default()`; a `default: null` is only valid against the nullable type.
     const mergedDefault = defaultValue !== undefined ? defaultValue : schema.default

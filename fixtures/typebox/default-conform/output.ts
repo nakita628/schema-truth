@@ -9,9 +9,9 @@ const Mode = Type.Union([
 const Precision = Type.Number()
 
 export const Settings = Type.Object({
-  precision: Type.Optional(Precision),
+  precision: Type.Optional(Type.Intersect([Precision], { default: 7 })),
   mode: Type.Optional(Mode),
-  fallbackMode: Type.Optional(Mode),
+  fallbackMode: Type.Optional(Type.Intersect([Mode], { default: 'coerce' })),
   ratio: Type.Optional(Type.Number({ default: 0.5 })),
   count: Type.Optional(Type.Union([Type.Integer(), Type.Null()])),
   attachments: Type.Optional(

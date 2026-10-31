@@ -72,12 +72,15 @@ export function schemaToEffect(input: JSONSchema, options?: GenerateOptions): st
     ? `export const ${rootName}: Schema.Schema<_${rootName}> = ${rootSchema}`
     : `export const ${rootName} = ${rootSchema}`
 
-  // `Effect` backs decoding defaults and `SchemaTransformation` backs the
-  // string case/boolean conversions; import each only when one is emitted.
+  // `Effect` backs decoding defaults, `SchemaGetter` / `SchemaIssue` an intersection that
+  // decodes every member, and `SchemaTransformation` the string case/boolean conversions;
+  // import each only when one is emitted.
   const emitted = `${schemaDefsCode}\n${rootExport}`
   const modules = [
-    ...(emitted.includes('Effect.succeed(') ? ['Effect'] : []),
+    ...(/(?<![\w.])Effect\./u.test(emitted) ? ['Effect'] : []),
     'Schema',
+    ...(emitted.includes('SchemaGetter.') ? ['SchemaGetter'] : []),
+    ...(emitted.includes('SchemaIssue.') ? ['SchemaIssue'] : []),
     ...(emitted.includes('SchemaTransformation.') ? ['SchemaTransformation'] : []),
   ]
   const importLine = `import { ${modules.join(', ')} } from "effect"`

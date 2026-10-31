@@ -67,7 +67,7 @@ describe('object', () => {
           'Schema',
           false,
         ),
-      ).toBe('z.object({a:z.string()}).refine((val)=>Object.keys(val).length>=2)')
+      ).toBe('z.looseObject({a:z.string()}).refine((val)=>Object.keys(val).length>=2)')
     })
 
     it('emits .refine for maxProperties', () => {
@@ -82,7 +82,7 @@ describe('object', () => {
           'Schema',
           false,
         ),
-      ).toBe('z.object({a:z.string()}).refine((val)=>Object.keys(val).length<=5)')
+      ).toBe('z.looseObject({a:z.string()}).refine((val)=>Object.keys(val).length<=5)')
     })
 
     it('emits both with x-minProperties-message / x-maxProperties-message', () => {
@@ -101,7 +101,7 @@ describe('object', () => {
           false,
         ),
       ).toBe(
-        'z.object({a:z.string()}).refine((val)=>Object.keys(val).length>=1,{error:"too few"}).refine((val)=>Object.keys(val).length<=3,{error:"too many"})',
+        'z.looseObject({a:z.string()}).refine((val)=>Object.keys(val).length>=1,{error:"too few"}).refine((val)=>Object.keys(val).length<=3,{error:"too many"})',
       )
     })
   })
@@ -120,7 +120,7 @@ describe('object', () => {
           false,
         ),
       ).toBe(
-        'z.object({a:z.string()}).refine((val)=>Object.keys(val).every((key)=>new RegExp("^[a-z]+$").test(key)))',
+        'z.looseObject({a:z.string()}).refine((val)=>Object.keys(val).every((key)=>new RegExp("^[a-z]+$").test(key)))',
       )
     })
 
@@ -137,7 +137,7 @@ describe('object', () => {
           false,
         ),
       ).toBe(
-        'z.object({a:z.string()}).refine((val)=>Object.keys(val).every((key)=>["a","b","c"].includes(key)))',
+        'z.looseObject({a:z.string()}).refine((val)=>Object.keys(val).every((key)=>["a","b","c"].includes(key)))',
       )
     })
 
@@ -155,7 +155,7 @@ describe('object', () => {
           false,
         ),
       ).toBe(
-        'z.object({a:z.string()}).refine((val)=>Object.keys(val).every((key)=>new RegExp("^[a-z]+$").test(key)),{error:"lowercase only"})',
+        'z.looseObject({a:z.string()}).refine((val)=>Object.keys(val).every((key)=>new RegExp("^[a-z]+$").test(key)),{error:"lowercase only"})',
       )
     })
   })
@@ -174,7 +174,7 @@ describe('object', () => {
           false,
         ),
       ).toBe(
-        'z.object({a:z.string()}).refine((val)=>Object.entries(val).every(([key,value])=>!new RegExp("^x-").test(key)||z.string().safeParse(value).success))',
+        'z.looseObject({a:z.string()}).refine((val)=>Object.entries(val).every(([key,value])=>!new RegExp("^x-").test(key)||z.string().safeParse(value).success))',
       )
     })
 
@@ -190,7 +190,7 @@ describe('object', () => {
           false,
         ),
       ).toBe(
-        'z.record(z.string(),z.string()).refine((val)=>Object.entries(val).every(([key,value])=>!new RegExp("^id_").test(key)||z.number().safeParse(value).success))',
+        'z.looseObject({}).refine((val)=>Object.entries(val).every(([key,value])=>!new RegExp("^id_").test(key)||z.number().safeParse(value).success)).refine((val)=>Object.entries(val).every(([key,value])=>[].includes(key)||new RegExp("^id_").test(key)||z.string().safeParse(value).success))',
       )
     })
   })
@@ -212,7 +212,7 @@ describe('object', () => {
           false,
         ),
       ).toBe(
-        "z.object({card:z.string(),billing:z.string().exactOptional()}).refine((val)=>!('card' in val)||('billing' in val))",
+        "z.looseObject({card:z.string(),billing:z.string().exactOptional()}).refine((val)=>!('card' in val)||('billing' in val))",
       )
     })
 
@@ -233,7 +233,7 @@ describe('object', () => {
           false,
         ),
       ).toBe(
-        "z.object({a:z.string().exactOptional(),b:z.string().exactOptional(),c:z.string().exactOptional()}).refine((val)=>!('a' in val)||('b' in val&&'c' in val),{error:\"a needs b and c\"})",
+        "z.looseObject({a:z.string().exactOptional(),b:z.string().exactOptional(),c:z.string().exactOptional()}).refine((val)=>!('a' in val)||('b' in val&&'c' in val),{error:\"a needs b and c\"})",
       )
     })
   })
@@ -252,7 +252,7 @@ describe('object', () => {
           false,
         ),
       ).toBe(
-        '(()=>{const Schema=z.object({a:z.string()});return z.unknown().check((ctx)=>{const result=Schema.safeParse(ctx.value);if(!result.success){for(const issue of result.error.issues){if(issue.path.length>0){ctx.issues.push({...issue,message:"bad props"})}else{ctx.issues.push(issue)}}}}).pipe(Schema)})()',
+        '(()=>{const Schema=z.object({a:z.string()});return z.unknown().check((ctx)=>{const result=Schema.safeParse(ctx.value);if(!result.success){for(const issue of result.error.issues){if(issue.code===\'invalid_type\'){ctx.issues.push({...issue,input:issue.input,message:issue.path.length>0?"bad props":issue.message})}else if(issue.code===\'too_big\'){ctx.issues.push({...issue,input:issue.input,message:issue.path.length>0?"bad props":issue.message})}else if(issue.code===\'too_small\'){ctx.issues.push({...issue,input:issue.input,message:issue.path.length>0?"bad props":issue.message})}else if(issue.code===\'invalid_format\'){ctx.issues.push({...issue,input:issue.input,message:issue.path.length>0?"bad props":issue.message})}else if(issue.code===\'not_multiple_of\'){ctx.issues.push({...issue,input:issue.input,message:issue.path.length>0?"bad props":issue.message})}else if(issue.code===\'unrecognized_keys\'){ctx.issues.push({...issue,input:issue.input,message:issue.path.length>0?"bad props":issue.message})}else if(issue.code===\'invalid_union\'){ctx.issues.push({...issue,input:issue.input,message:issue.path.length>0?"bad props":issue.message})}else if(issue.code===\'invalid_key\'){ctx.issues.push({...issue,input:issue.input,message:issue.path.length>0?"bad props":issue.message})}else if(issue.code===\'invalid_element\'){ctx.issues.push({...issue,input:issue.input,message:issue.path.length>0?"bad props":issue.message})}else if(issue.code===\'invalid_value\'){ctx.issues.push({...issue,input:issue.input,message:issue.path.length>0?"bad props":issue.message})}else if(issue.code===\'custom\'){ctx.issues.push({...issue,input:issue.input,message:issue.path.length>0?"bad props":issue.message})}}}}).pipe(Schema)})()',
       )
     })
 
@@ -269,7 +269,7 @@ describe('object', () => {
           false,
         ),
       ).toBe(
-        '(()=>{const Schema=z.object({a:z.string()});return z.unknown().check((ctx)=>{const result=Schema.safeParse(ctx.value);if(!result.success){for(const issue of result.error.issues){if(issue.path.length>0){ctx.issues.push({...issue,message:((issue) => `bad ${issue.path[0]}`)(issue)})}else{ctx.issues.push(issue)}}}}).pipe(Schema)})()',
+        "(()=>{const Schema=z.object({a:z.string()});return z.unknown().check((ctx)=>{const result=Schema.safeParse(ctx.value);if(!result.success){for(const issue of result.error.issues){if(issue.code==='invalid_type'){ctx.issues.push({...issue,input:issue.input,message:issue.path.length>0?((issue) => `bad ${issue.path[0]}`)(issue):issue.message})}else if(issue.code==='too_big'){ctx.issues.push({...issue,input:issue.input,message:issue.path.length>0?((issue) => `bad ${issue.path[0]}`)(issue):issue.message})}else if(issue.code==='too_small'){ctx.issues.push({...issue,input:issue.input,message:issue.path.length>0?((issue) => `bad ${issue.path[0]}`)(issue):issue.message})}else if(issue.code==='invalid_format'){ctx.issues.push({...issue,input:issue.input,message:issue.path.length>0?((issue) => `bad ${issue.path[0]}`)(issue):issue.message})}else if(issue.code==='not_multiple_of'){ctx.issues.push({...issue,input:issue.input,message:issue.path.length>0?((issue) => `bad ${issue.path[0]}`)(issue):issue.message})}else if(issue.code==='unrecognized_keys'){ctx.issues.push({...issue,input:issue.input,message:issue.path.length>0?((issue) => `bad ${issue.path[0]}`)(issue):issue.message})}else if(issue.code==='invalid_union'){ctx.issues.push({...issue,input:issue.input,message:issue.path.length>0?((issue) => `bad ${issue.path[0]}`)(issue):issue.message})}else if(issue.code==='invalid_key'){ctx.issues.push({...issue,input:issue.input,message:issue.path.length>0?((issue) => `bad ${issue.path[0]}`)(issue):issue.message})}else if(issue.code==='invalid_element'){ctx.issues.push({...issue,input:issue.input,message:issue.path.length>0?((issue) => `bad ${issue.path[0]}`)(issue):issue.message})}else if(issue.code==='invalid_value'){ctx.issues.push({...issue,input:issue.input,message:issue.path.length>0?((issue) => `bad ${issue.path[0]}`)(issue):issue.message})}else if(issue.code==='custom'){ctx.issues.push({...issue,input:issue.input,message:issue.path.length>0?((issue) => `bad ${issue.path[0]}`)(issue):issue.message})}}}}).pipe(Schema)})()",
       )
     })
 
@@ -287,7 +287,7 @@ describe('object', () => {
           false,
         ),
       ).toBe(
-        '(()=>{const Schema=z.object({a:z.string()});return z.unknown().check((ctx)=>{const result=Schema.safeParse(ctx.value);if(!result.success){for(const issue of result.error.issues){if(issue.path.length>0){ctx.issues.push({...issue,message:"bad props"})}else{ctx.issues.push(issue)}}}}).pipe(Schema)})().refine((val)=>Object.keys(val).length>=1)',
+        '(()=>{const Schema=z.looseObject({a:z.string()});return z.unknown().check((ctx)=>{const result=Schema.safeParse(ctx.value);if(!result.success){for(const issue of result.error.issues){if(issue.code===\'invalid_type\'){ctx.issues.push({...issue,input:issue.input,message:issue.path.length>0?"bad props":issue.message})}else if(issue.code===\'too_big\'){ctx.issues.push({...issue,input:issue.input,message:issue.path.length>0?"bad props":issue.message})}else if(issue.code===\'too_small\'){ctx.issues.push({...issue,input:issue.input,message:issue.path.length>0?"bad props":issue.message})}else if(issue.code===\'invalid_format\'){ctx.issues.push({...issue,input:issue.input,message:issue.path.length>0?"bad props":issue.message})}else if(issue.code===\'not_multiple_of\'){ctx.issues.push({...issue,input:issue.input,message:issue.path.length>0?"bad props":issue.message})}else if(issue.code===\'unrecognized_keys\'){ctx.issues.push({...issue,input:issue.input,message:issue.path.length>0?"bad props":issue.message})}else if(issue.code===\'invalid_union\'){ctx.issues.push({...issue,input:issue.input,message:issue.path.length>0?"bad props":issue.message})}else if(issue.code===\'invalid_key\'){ctx.issues.push({...issue,input:issue.input,message:issue.path.length>0?"bad props":issue.message})}else if(issue.code===\'invalid_element\'){ctx.issues.push({...issue,input:issue.input,message:issue.path.length>0?"bad props":issue.message})}else if(issue.code===\'invalid_value\'){ctx.issues.push({...issue,input:issue.input,message:issue.path.length>0?"bad props":issue.message})}else if(issue.code===\'custom\'){ctx.issues.push({...issue,input:issue.input,message:issue.path.length>0?"bad props":issue.message})}}}}).pipe(Schema)})().refine((val)=>Object.keys(val).length>=1)',
       )
     })
   })

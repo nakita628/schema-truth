@@ -1,5 +1,6 @@
 import { UNSAFE_GENERATED_MARKER } from '../../constants/index.js'
 import {
+  definitionsOf,
   emitOptionsOf,
   findCodeExtensionKeysInSchema,
   hoistNestedRefs,
@@ -24,12 +25,14 @@ export function schemaToArktype(input: JSONSchema, options?: GenerateOptions): s
   // and its subtypes do not refer to each other in a loop.
   const schema = withPolymorphicBases(hoistNestedRefs(input))
   const exportType = options?.exportType ?? true
-  const emitOptions = emitOptionsOf(options)
+  const baseOptions = emitOptionsOf(options)
   const codeExtensionsPresent =
-    emitOptions.unsafeCodeExtensions === true && findCodeExtensionKeysInSchema(schema).length > 0
+    baseOptions.unsafeCodeExtensions === true && findCodeExtensionKeysInSchema(schema).length > 0
   const prefix = codeExtensionsPresent ? [UNSAFE_GENERATED_MARKER] : []
-  const toName = schemaNamer(emitOptions.openapi)
+  const toName = schemaNamer(baseOptions.openapi)
   const plan = planDocument(schema, rootNameOf(schema, toName))
+  const definitions = definitionsOf(baseOptions, plan.definitions)
+  const emitOptions = definitions === undefined ? baseOptions : { ...baseOptions, definitions }
   const { rootName } = plan
 
   if (plan.hasDefinitions) {
@@ -48,8 +51,12 @@ export function schemaToArktype(input: JSONSchema, options?: GenerateOptions): s
     // Entries may call `type(...)` — `arktypeWrap` reaches for it whenever a
     // bare definition needs a method such as `.describe()` — or read `type.errors`
     // in a wire union, so the import has to carry it alongside `scope`.
-    const scopeBody = `const types = scope({${scopeEntries.join(',')}}).export()`
-    const usesType = /\btype[(.]/u.test(scopeBody)
+    // A callback that checks a value against a definition reaches it through the scope.
+    const entries = scopeEntries.join(',')
+    const scopeBody = entries.includes('$.type(')
+      ? `const $ = scope({${entries}})\n\nconst types = $.export()`
+      : `const types = scope({${entries}}).export()`
+    const usesType = /(?<![\w$.])type[(.]/u.test(scopeBody)
 
     return [
       ...prefix,

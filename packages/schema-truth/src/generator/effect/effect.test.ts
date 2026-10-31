@@ -1024,7 +1024,7 @@ describe('effect', () => {
   })
 
   describe('x-unevaluatedProperties-message', () => {
-    it('attaches parseOptions:onExcessProperty=error + message annotation', () => {
+    it('refuses unevaluated keys with a filter carrying the message', () => {
       expect(
         effect({
           type: 'object',
@@ -1034,7 +1034,7 @@ describe('effect', () => {
           'x-unevaluatedProperties-message': 'no extras',
         }),
       ).toBe(
-        'Schema.Struct({a:Schema.String}).annotate({parseOptions:{onExcessProperty:"error"},messageUnexpectedKey:"no extras"})',
+        'Schema.StructWithRest(Schema.Struct({a:Schema.String}),[Schema.Record(Schema.String,Schema.Unknown)]).check(Schema.makeFilter((input)=>Object.keys(input).every((key)=>["a"].includes(key)),{message:"no extras"}))',
       )
     })
   })

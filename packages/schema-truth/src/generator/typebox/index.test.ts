@@ -378,7 +378,7 @@ export type WithDefault = Static<typeof WithDefault>`
     })
     const expected = `import { Type, type Static } from 'typebox'
 
-export const NullDefault = Type.Object({value:Type.Union([Type.Optional(Type.Intersect([Type.String()],{default:"x"})),Type.Null()])})
+export const NullDefault = Type.Object({value:Type.Optional(Type.Union([Type.Intersect([Type.String()],{default:"x"}),Type.Null()]))})
 
 export type NullDefault = Static<typeof NullDefault>`
     expect(result).toBe(expected)

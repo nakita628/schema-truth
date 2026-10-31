@@ -105,7 +105,7 @@ describe('object', () => {
       ).toBe('Type.Object({a:Type.String()},{patternProperties:{"^x-":Type.String()}})')
     })
 
-    it('combines on Type.Record (additionalProperties: schema)', () => {
+    it('keeps additionalProperties for the keys no pattern matches', () => {
       expect(
         object(
           {
@@ -116,7 +116,9 @@ describe('object', () => {
           'Schema',
           false,
         ),
-      ).toBe('Type.Record(Type.String(),Type.String(),{patternProperties:{"^id_":Type.Number()}})')
+      ).toBe(
+        'Type.Object({},{additionalProperties:Type.String(),patternProperties:{"^id_":Type.Number()}})',
+      )
     })
   })
 

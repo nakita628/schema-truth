@@ -1,22 +1,33 @@
 import {
   hasCombinator,
+  isArktypeDefinition,
   isObjectPrototypeProperty,
-  isQuoted,
   isStringWireLocation,
 } from '../../guard/index.js'
-import { arktypePreprocess, ownProperties, propertyEmitOptions } from '../../helper/index.js'
+import {
+  arktypePreprocess,
+  callbackReturn,
+  callbackType,
+  isEvaluatedKeyExpression,
+  ownProperties,
+  propertyEmitOptions,
+} from '../../helper/index.js'
 import type { EmitOptions } from '../../options/index.js'
 import type { JSONSchema } from '../../parser/index.js'
 import { makeSafeKey } from '../../utils/index.js'
 import { arktype } from './arktype.js'
 
-function composeNarrows(base: string, narrows: readonly string[]): string {
-  return narrows.length === 0 ? base : narrows.reduce((acc, n) => `${acc}.narrow(${n})`, base)
-}
-
-/** Wrap a raw arktype expression with `type(...)` if it's a bare quoted string. */
-function ensureRuntime(s: string): string {
-  return isQuoted(s) ? `type(${s})` : s
+/**
+ * An object definition with its narrows. Inside a scope they stay in definition syntax
+ * (`[def, ":", fn]`), which the scope resolves; outside, they chain on `type(def)`.
+ */
+function composeNarrows(
+  definition: string,
+  narrows: readonly string[],
+  scopeMode: boolean,
+): string {
+  if (scopeMode) return narrows.reduce((acc, n) => `[${acc},":",${n}]`, definition)
+  return narrows.reduce((acc, n) => `${acc}.narrow(${n})`, `type(${definition})`)
 }
 
 /**
@@ -26,8 +37,8 @@ function ensureRuntime(s: string): string {
  */
 function narrowPredicate(predicate: string, message?: string): string {
   return message
-    ? `(data, ctx) => ${predicate} || ctx.mustBe(${JSON.stringify(message)})`
-    : `(data) => ${predicate}`
+    ? callbackReturn('(data, ctx)', `${predicate} || ctx.mustBe(${JSON.stringify(message)})`)
+    : callbackReturn('(data)', predicate)
 }
 
 /**
@@ -80,7 +91,7 @@ export function object(
   const patternPropertiesNarrows = (): readonly string[] =>
     schema.patternProperties
       ? Object.entries(schema.patternProperties).map(([pattern, propSchema]) => {
-          const s = ensureRuntime(arktype(propSchema, rootName, isArktype, options))
+          const s = callbackType(arktype(propSchema, rootName, isArktype, options), isArktype)
           return narrowPredicate(
             `Object.entries(data).every(([key, value]) => !new RegExp(${JSON.stringify(pattern)}).test(key) || ${s}.allows(value))`,
             patternPropsMessage,
@@ -88,47 +99,71 @@ export function object(
         })
       : []
 
-  // ── additionalProperties: schema → type({"[string]": ...}) + propertyNames + patternProperties ──
-  if (typeof schema.additionalProperties === 'object') {
+  // ── additionalProperties: schema → type({"[string]": ...}) + propertyNames ──
+  // With `properties` or patterns beside it, `additionalProperties` covers only the keys
+  // they leave, handled with them below.
+  if (
+    typeof schema.additionalProperties === 'object' &&
+    schema.properties === undefined &&
+    schema.patternProperties === undefined
+  ) {
     const innerLiteral = `{"[string]":${arktype(schema.additionalProperties, rootName, isArktype, options)}}`
-    const narrows = [propertyNamesNarrow(), ...patternPropertiesNarrows()].filter((a) => a !== '')
-    if (narrows.length > 0) {
-      return composeNarrows(`type(${innerLiteral})`, narrows)
-    }
+    const narrows = [propertyNamesNarrow()].filter((a) => a !== '')
+    if (narrows.length > 0) return composeNarrows(innerLiteral, narrows, isArktype)
     return isArktype ? innerLiteral : `type(${innerLiteral})`
   }
 
+  const properties = schema.properties ?? {}
+  // A required key no property declares only has to be present, with any value.
+  const undeclaredRequired = (schema.required ?? []).filter(
+    (key) => !Object.hasOwn(properties, key),
+  )
   if (!schema.properties) {
     if (schema.additionalProperties === true) return '"unknown"'
-    return isArktype ? '{}' : 'type({})'
+    const checksKeys =
+      undeclaredRequired.length > 0 ||
+      schema.patternProperties !== undefined ||
+      schema.additionalProperties === false ||
+      schema.unevaluatedProperties !== undefined
+    if (!checksKeys) return isArktype ? '{}' : 'type({})'
   }
 
+  // A key a declared property or a `patternProperties` pattern covers is evaluated.
+  const isEvaluated = isEvaluatedKeyExpression(
+    { names: Object.keys(properties), patterns: Object.keys(schema.patternProperties ?? {}) },
+    'key',
+  )
+  // `"+": "reject"` refuses every undeclared key, a key a pattern allows included: with
+  // patterns, the narrow below refuses the keys neither covers instead.
   const additionalMode =
     schema.additionalProperties === true
       ? 'delete'
-      : schema.additionalProperties === false
+      : schema.additionalProperties === false && schema.patternProperties === undefined
         ? 'reject'
         : undefined
   const required = new Set(schema.required)
-  const props = Object.entries(schema.properties)
-    .map(([key, propSchema]) => {
-      const parsed = arktype(
-        propSchema,
-        rootName,
-        isArktype,
-        propertyEmitOptions(key, propSchema, options) ?? options,
-      )
-      if (!parsed) return null
-      const isRequired = required.has(key)
-      const baseSafeKey = makeSafeKey(key)
-      const safeKey = isRequired
-        ? baseSafeKey
-        : baseSafeKey.startsWith('"')
-          ? JSON.stringify(`${key}?`)
-          : `"${key}?"`
-      return `${safeKey}:${parsed}`
-    })
-    .filter((p) => p !== null)
+  const props = [
+    ...Object.entries(properties)
+      .map(([key, propSchema]) => {
+        const parsed = arktype(
+          propSchema,
+          rootName,
+          isArktype,
+          propertyEmitOptions(key, propSchema, options) ?? options,
+        )
+        if (!parsed) return null
+        const isRequired = required.has(key)
+        const baseSafeKey = makeSafeKey(key)
+        const safeKey = isRequired
+          ? baseSafeKey
+          : baseSafeKey.startsWith('"')
+            ? JSON.stringify(`${key}?`)
+            : `"${key}?"`
+        return `${safeKey}:${parsed}`
+      })
+      .filter((p) => p !== null),
+    ...undeclaredRequired.map((key) => `${makeSafeKey(key)}:"unknown"`),
+  ]
   const additionalProp = additionalMode ? `"+":"${additionalMode}"` : undefined
   const allProps = [...props, additionalProp].filter((p) => p !== undefined)
 
@@ -152,34 +187,35 @@ export function object(
   // additionally satisfy the named sub-schema.
   const dependentSchemasNarrows: readonly string[] = schema.dependentSchemas
     ? Object.entries(schema.dependentSchemas).map(([key, subSchema]) => {
-        const s = ensureRuntime(arktype(subSchema, rootName, isArktype, options))
+        const s = callbackType(arktype(subSchema, rootName, isArktype, options), isArktype)
         return narrowPredicate(`!('${key}' in data) || ${s}.allows(data)`, depSchMessage)
       })
     : []
   // v3.0: x-additionalProperties-message narrows extras-rejection
   // when additionalProperties: false.
   const additionalPropertiesNarrow =
-    schema.additionalProperties === false && addlPropsMessage
-      ? narrowPredicate(
-          `Object.keys(data).every((key) => ${JSON.stringify(Object.keys(schema.properties))}.includes(key))`,
-          addlPropsMessage,
-        )
+    schema.additionalProperties === false &&
+    (addlPropsMessage !== undefined || schema.patternProperties !== undefined)
+      ? narrowPredicate(`Object.keys(data).every((key) => ${isEvaluated})`, addlPropsMessage)
       : ''
   const unevaluatedPropertiesNarrow = (() => {
-    const u = schema.unevaluatedProperties
+    // `additionalProperties` as a schema holds the keys no property or pattern covers, as
+    // `unevaluatedProperties` does here.
+    const u =
+      typeof schema.additionalProperties === 'object'
+        ? schema.additionalProperties
+        : schema.unevaluatedProperties
     if (u === undefined || u === true) return ''
-    const declaredKeys = JSON.stringify(Object.keys(schema.properties ?? {}))
+    const message =
+      typeof schema.additionalProperties === 'object' ? addlPropsMessage : unevalPropsRawMessage
     if (u === false) {
-      return narrowPredicate(
-        `Object.keys(data).every((key) => ${declaredKeys}.includes(key))`,
-        unevalPropsRawMessage,
-      )
+      return narrowPredicate(`Object.keys(data).every((key) => ${isEvaluated})`, message)
     }
     if (typeof u === 'object') {
-      const s = ensureRuntime(arktype(u, rootName, isArktype, options))
+      const s = callbackType(arktype(u, rootName, isArktype, options), isArktype)
       return narrowPredicate(
-        `Object.entries(data).filter(([key]) => !${declaredKeys}.includes(key)).every(([, value]) => ${s}.allows(value))`,
-        unevalPropsRawMessage,
+        `Object.entries(data).every(([key, value]) => ${isEvaluated} || ${s}.allows(value))`,
+        message,
       )
     }
     return ''
@@ -187,12 +223,12 @@ export function object(
 
   const ifThenElseNarrows = (() => {
     if (!schema.if) return []
-    const ifS = ensureRuntime(arktype(schema.if, rootName, isArktype, options))
+    const ifS = callbackType(arktype(schema.if, rootName, isArktype, options), isArktype)
     const thenS = schema.then
-      ? ensureRuntime(arktype(schema.then, rootName, isArktype, options))
+      ? callbackType(arktype(schema.then, rootName, isArktype, options), isArktype)
       : undefined
     const elseS = schema.else
-      ? ensureRuntime(arktype(schema.else, rootName, isArktype, options))
+      ? callbackType(arktype(schema.else, rootName, isArktype, options), isArktype)
       : undefined
     if (!thenS && !elseS) return []
     const ifMessage = schema['x-if-message']
@@ -222,20 +258,23 @@ export function object(
 
   const baseExpr =
     narrows.length > 0
-      ? composeNarrows(`type(${innerLiteral})`, narrows)
+      ? composeNarrows(innerLiteral, narrows, isArktype)
       : isArktype
         ? innerLiteral
         : `type(${innerLiteral})`
   const propsMessage = schema['x-properties-message']
   const described = (() => {
     if (typeof propsMessage !== 'string') return baseExpr
-    const wrapped = baseExpr.startsWith('{') ? `type(${baseExpr})` : baseExpr
+    if (isArktype && isArktypeDefinition(baseExpr)) {
+      return `[${baseExpr},"@",${JSON.stringify(propsMessage)}]`
+    }
+    const wrapped = isArktypeDefinition(baseExpr) ? `type(${baseExpr})` : baseExpr
     return `${wrapped}.describe(${JSON.stringify(propsMessage)})`
   })()
   // A parameter object answers an `Object.prototype` name it was not sent with the
   // inherited member, so it is copied onto a null-prototype object before the check, and
   // back onto a plain one after it.
-  const hasInheritedName = Object.keys(schema.properties).some(isObjectPrototypeProperty)
+  const hasInheritedName = Object.keys(properties).some(isObjectPrototypeProperty)
   return isStringWireLocation(options?.paramIn) && hasInheritedName
     ? `${arktypePreprocess([ownProperties('data')], described, 'object')}.pipe((data) => ({ ...data }))`
     : described

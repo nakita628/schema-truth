@@ -22,8 +22,8 @@ const KafkaConnection: v.GenericSchema<unknown, _KafkaConnection> = v.intersect(
 const SampleConnection: v.GenericSchema<unknown, _SampleConnection> = v.lazy(() => ConnectionBase)
 
 const Connection: v.GenericSchema<unknown, _Connection> = v.union([
-  v.lazy(() => SampleConnection),
-  v.lazy(() => KafkaConnection),
+  v.intersect([v.lazy(() => SampleConnection), v.object({ type: v.literal('Sample') })]),
+  v.intersect([v.lazy(() => KafkaConnection), v.object({ type: v.literal('Kafka') })]),
 ])
 
 export const Connections: v.GenericSchema<unknown, _Connections> = v.array(v.lazy(() => Connection))

@@ -1,4 +1,4 @@
-import { Effect, Schema } from 'effect'
+import { Effect, Schema, SchemaGetter, SchemaIssue } from 'effect'
 
 type _A = { readonly id: string; readonly type: 'B' | 'C'; readonly payload: _B | _C }
 
@@ -43,11 +43,30 @@ const B: Schema.Schema<_B> = Schema.Struct({
     const M1 = Schema.Struct({
       comment: Schema.String.pipe(Schema.withDecodingDefault(Effect.succeed('N/A'))),
     })
+    const isAll = (input: unknown): input is typeof M0.Type & typeof M1.Type =>
+      Schema.is(M0)(input) && Schema.is(M1)(input)
     return Schema.Unknown.pipe(
-      Schema.refine(
-        (input): input is typeof M0.Type & typeof M1.Type =>
-          Schema.is(Schema.toEncoded(M0))(input) && Schema.is(Schema.toEncoded(M1))(input),
-      ),
+      Schema.decodeTo(Schema.declare(isAll), {
+        decode: SchemaGetter.transformEffect((input) =>
+          Effect.all([
+            Schema.decodeUnknownEffect(M0)(input),
+            Schema.decodeUnknownEffect(M1)(input),
+          ]).pipe(
+            Effect.mapError((error) => error.issue),
+            Effect.flatMap((values) => {
+              const merged = values.every(
+                (value) => typeof value === 'object' && value !== null && !Array.isArray(value),
+              )
+                ? Object.assign({}, ...values)
+                : values[0]
+              return isAll(merged)
+                ? Effect.succeed(merged)
+                : Effect.fail(new SchemaIssue.InvalidValue(undefined, merged))
+            }),
+          ),
+        ),
+        encode: SchemaGetter.passthrough({ strict: false }),
+      }),
     )
   })(),
 })

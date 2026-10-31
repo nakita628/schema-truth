@@ -23,8 +23,14 @@ const KafkaConnection: z.ZodType<_KafkaConnection> = z.intersection(
 const SampleConnection: z.ZodType<_SampleConnection> = z.lazy(() => ConnectionBase)
 
 const Connection: z.ZodType<_Connection> = z.xor([
-  z.lazy(() => SampleConnection),
-  z.lazy(() => KafkaConnection),
+  z.intersection(
+    z.lazy(() => SampleConnection),
+    z.object({ type: z.literal('Sample') }),
+  ),
+  z.intersection(
+    z.lazy(() => KafkaConnection),
+    z.object({ type: z.literal('Kafka') }),
+  ),
 ])
 
 export const Connections: z.ZodType<_Connections> = z.array(z.lazy(() => Connection))

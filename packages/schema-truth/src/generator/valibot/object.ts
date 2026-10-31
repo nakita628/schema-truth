@@ -4,7 +4,12 @@ import {
   isObjectPrototypeProperty,
   isStringWireLocation,
 } from '../../guard/index.js'
-import { isOptionalByDefault, ownProperties, propertyEmitOptions } from '../../helper/index.js'
+import {
+  isEvaluatedKeyExpression,
+  isOptionalByDefault,
+  ownProperties,
+  propertyEmitOptions,
+} from '../../helper/index.js'
 import type { EmitOptions } from '../../options/index.js'
 import type { JSONSchema } from '../../parser/index.js'
 import {
@@ -77,14 +82,42 @@ export function object(
         })
       : []
 
-  // ── additionalProperties: schema → v.record(...) + propertyNames + patternProperties ──
-  if (typeof schema.additionalProperties === 'object') {
+  // ── additionalProperties: schema → v.record(...) + propertyNames ──
+  // With `properties` or patterns beside it, `additionalProperties` covers only the keys
+  // they leave, handled with them below.
+  if (
+    typeof schema.additionalProperties === 'object' &&
+    schema.properties === undefined &&
+    schema.patternProperties === undefined
+  ) {
     const record = `v.record(v.string(),${valibot(schema.additionalProperties, rootName, isValibot, options)})`
-    const actions = [propertyNamesCheck(), ...patternPropertiesChecks()].filter((a) => a !== '')
+    const actions = [propertyNamesCheck()].filter((a) => a !== '')
     return actions.length > 0 ? `v.pipe(${record},${actions.join(',')})` : record
   }
 
-  if (!schema.properties) {
+  const properties = schema.properties ?? {}
+  // A required key no property declares only has to be present.
+  const undeclaredRequired = (schema.required ?? []).filter(
+    (key) => !Object.hasOwn(properties, key),
+  )
+  const unevaluated = schema.unevaluatedProperties
+  const closed = schema.additionalProperties === false || unevaluated === false
+  // A key outside `properties` is still allowed when a pattern or a schema covers it, so the
+  // object cannot simply reject undeclared keys.
+  const closedByCheck = closed && schema.patternProperties !== undefined
+  // The schema a key no property names and no pattern matches is held to.
+  const extraSchema =
+    typeof schema.additionalProperties === 'object'
+      ? schema.additionalProperties
+      : typeof unevaluated === 'object'
+        ? unevaluated
+        : undefined
+  const extraMessage =
+    typeof schema.additionalProperties === 'object'
+      ? schema['x-additionalProperties-message']
+      : schema['x-unevaluatedProperties-message']
+  const checksKeys = undeclaredRequired.length > 0 || extraSchema !== undefined || closed
+  if (!schema.properties && !checksKeys) {
     if (schema.patternProperties) {
       const record = `v.record(v.string(),v.unknown())`
       const actions = [propertyNamesCheck(), ...patternPropertiesChecks()].filter((a) => a !== '')
@@ -94,22 +127,34 @@ export function object(
     return 'v.object({})'
   }
 
-  const conditionalKeysReferenced = hasConditional(schema)
+  // `v.object()` drops the keys it does not declare before a check sees the value, so a
+  // keyword that reads those keys needs the object to keep them.
+  const readsUndeclaredKeys =
+    hasConditional(schema) ||
+    schema.patternProperties !== undefined ||
+    schema.propertyNames !== undefined ||
+    schema.minProperties !== undefined ||
+    schema.maxProperties !== undefined ||
+    schema.dependentRequired !== undefined ||
+    schema.dependentSchemas !== undefined ||
+    undeclaredRequired.length > 0 ||
+    extraSchema !== undefined ||
+    closedByCheck
   const objectKind =
     schema.additionalProperties === true
       ? 'looseObject'
-      : schema.additionalProperties === false || schema.unevaluatedProperties === false
+      : closed && !closedByCheck
         ? 'strictObject'
-        : conditionalKeysReferenced
+        : readsUndeclaredKeys
           ? 'looseObject'
           : 'object'
   const required = new Set(schema.required)
   // A property with a default is already `v.optional(..., default)` from its own emitter;
   // wrapped in a second `v.optional()` the default would never be reached.
-  const hasOwnDefault = Object.values(schema.properties).some((propSchema) =>
+  const hasOwnDefault = Object.values(properties).some((propSchema) =>
     isOptionalByDefault(propSchema, options?.definitions),
   )
-  const props = Object.entries(schema.properties)
+  const props = Object.entries(properties)
     .map(([key, propSchema]) => {
       const parsed = valibot(
         propSchema,
@@ -138,7 +183,7 @@ export function object(
   const partialBase = propsMessage
     ? (() => {
         const msgExpr = issueMessageExpression(propsMessage)
-        return `v.pipe(v.unknown(),v.rawCheck(({dataset,addIssue})=>{if(!dataset.typed)return;const result=v.safeParse(${rawBase},dataset.value);if(!result.success){for(const issue of result.issues){if(issue.path&&issue.path.length>0){addIssue({message:${msgExpr},path:issue.path})}else{addIssue(issue)}}}}))`
+        return `v.pipe(v.unknown(),v.rawCheck(({dataset,addIssue})=>{if(!dataset.typed)return;const result=v.safeParse(${rawBase},dataset.value);if(!result.success){for(const issue of result.issues){if(issue.path&&issue.path.length>0){addIssue({message:${msgExpr},path:issue.path})}else{addIssue({message:issue.message})}}}}),${rawBase})`
       })()
     : rawBase
 
@@ -192,11 +237,28 @@ export function object(
     return parts
   })()
 
+  const requiredPresentCheck =
+    undeclaredRequired.length > 0
+      ? `v.check((input)=>${JSON.stringify(undeclaredRequired)}.every((key)=>key in input)${errorArg})`
+      : ''
+  // A key no property names and no pattern matches: refused when the object is closed,
+  // held to `unevaluatedProperties` when that is a schema.
+  const isEvaluated = isEvaluatedKeyExpression(
+    { names: Object.keys(properties), patterns: Object.keys(schema.patternProperties ?? {}) },
+    'key',
+  )
+  const unevaluatedKeysCheck = closedByCheck
+    ? `v.check((input)=>Object.keys(input).every((key)=>${isEvaluated})${valibotErrorPart(strictExtrasMessage ?? errorMessage)})`
+    : extraSchema !== undefined
+      ? `v.check((input)=>Object.entries(input).every(([key,value])=>${isEvaluated}||v.safeParse(${valibot(extraSchema, rootName, isValibot, options)},value).success)${valibotErrorPart(extraMessage ?? errorMessage)})`
+      : ''
   const actions = [
     minPropertiesCheck,
     maxPropertiesCheck,
     propertyNamesCheck(),
     ...patternPropertiesChecks(),
+    requiredPresentCheck,
+    unevaluatedKeysCheck,
     ...dependentRequiredChecks,
     ...dependentSchemasChecks,
     additionalPropertiesCheck,
@@ -205,7 +267,7 @@ export function object(
 
   const objectExpr =
     actions.length > 0 ? `v.pipe(${partialBase},${actions.join(',')})` : partialBase
-  const hasInheritedName = Object.keys(schema.properties).some(isObjectPrototypeProperty)
+  const hasInheritedName = Object.keys(properties).some(isObjectPrototypeProperty)
   return isStringWireLocation(options?.paramIn) && hasInheritedName
     ? `v.pipe(v.unknown(),v.transform(${ownProperties('input')}),${objectExpr})`
     : objectExpr

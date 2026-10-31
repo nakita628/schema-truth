@@ -16,18 +16,18 @@ export const Bucket: z.ZodType<_Bucket> = (() => {
     .check((ctx) => {
       const o = ctx.value
       if (typeof o !== 'object' || o === null || Array.isArray(o)) return
-      const Unevaluated = z.lazy(() => Base)
       for (const [k, v] of Object.entries(o)) {
-        if (['meta', 'doc_count'].includes(k)) continue
-        const result = Unevaluated.safeParse(v)
-        if (!result.success) {
-          for (const issue of result.error.issues) {
-            ctx.issues.push({
-              code: 'custom',
-              input: v,
-              path: [k, ...issue.path],
-              message: issue.message,
-            })
+        if (!['meta', 'doc_count'].includes(k)) {
+          const result = z.lazy(() => Base).safeParse(v)
+          if (!result.success) {
+            for (const issue of result.error.issues) {
+              ctx.issues.push({
+                code: 'custom',
+                input: v,
+                path: [k, ...issue.path],
+                message: issue.message,
+              })
+            }
           }
         }
       }

@@ -41,6 +41,10 @@ import {
   wireNullText,
   wireNumericKind,
   withoutParameterSerialization,
+  evaluatedProperties,
+  discriminatedMembers,
+  callbackReturn,
+  callbackType,
 } from '../../helper/index.js'
 import type { ArktypeWrapOptions } from '../../helper/index.js'
 import type { EmitOptions } from '../../options/index.js'
@@ -137,6 +141,45 @@ function isNumericMember(schema: JSONSchema): boolean {
     !isInt64(schema) &&
     schema.format !== 'bigint'
   )
+}
+
+/** An ArkType regex index-signature key for `source`, its slashes escaped. */
+function indexKey(source: string): string {
+  return JSON.stringify(`[/${source.replaceAll('/', '\\/')}/]`)
+}
+
+/**
+ * The members an `allOf` gains from `patternProperties` and `unevaluatedProperties` beside
+ * it: a regex index signature per pattern, holding the keys it matches to its schema, and
+ * one matching every key no member evaluates (no listed name, no pattern matching anywhere
+ * in it), holding it to `unevaluatedProperties`. An index signature can name a scope alias,
+ * which a `.narrow()` callback cannot.
+ */
+function objectKeysMembers(
+  schema: JSONSchema,
+  rootName: string,
+  isArktype: boolean,
+  options: EmitOptions | undefined,
+): readonly string[] {
+  const patternMembers = Object.entries(schema.patternProperties ?? {}).map(
+    ([pattern, propSchema]) =>
+      `{${indexKey(pattern)}:${arktype(propSchema, rootName, isArktype, options)}}`,
+  )
+  const unevaluated = schema.unevaluatedProperties
+  if (unevaluated !== false && (typeof unevaluated !== 'object' || unevaluated === null)) {
+    return patternMembers
+  }
+  const evaluated = evaluatedProperties(schema, options?.definitions)
+  if (evaluated === undefined) return patternMembers
+  const value =
+    unevaluated === false ? '"never"' : arktype(unevaluated, rootName, isArktype, options)
+  // `indexKey` escapes the slashes; everything else a name may hold is escaped here.
+  const names = evaluated.names.map((name) => name.replaceAll(/[\\^$.*+?()[\]{}|]/gu, '\\$&'))
+  const exclusions = [
+    ...(names.length === 0 ? [] : [`(?!(?:${names.join('|')})$)`]),
+    ...evaluated.patterns.map((pattern) => `(?![\\s\\S]*?(?:${pattern}))`),
+  ]
+  return [...patternMembers, `{${indexKey(`^${exclusions.join('')}`)}:${value}}`]
 }
 
 /**
@@ -248,7 +291,19 @@ function node(
 
   if (schema.oneOf) {
     if (schema.oneOf.length === 0) return arktypeWrap('"unknown"', schema)
-    const schemas = schema.oneOf.map((s) => arktype(s, rootName, isArktype, options))
+    // A referenced member is held to the discriminator values that select it, so members
+    // that overlap (subtypes of one base) do not both match.
+    const discriminated = discriminatedMembers(schema, schema.oneOf)
+    const schemas = schema.oneOf.map((s, i) => {
+      const member = arktype(s, rootName, isArktype, options)
+      const values = discriminated?.members[i]?.values
+      if (discriminated === undefined || values === undefined) return member
+      const literal = values.map((value) => `'${value.replaceAll(/['\\]/gu, '\\$&')}'`).join(' | ')
+      return intersectionStr(
+        [member, `{${JSON.stringify(discriminated.propertyName)}:${JSON.stringify(literal)}}`],
+        isArktype,
+      )
+    })
     return arktypeWrap(unionOf(schemas, schema['x-oneOf-message']), schema)
   }
 
@@ -292,7 +347,9 @@ function node(
       isKeywordOnlyMember(s) ? keywordConstraint(s) : arktype(s, rootName, isArktype, options),
     )
     if (schemas.length === 0) return arktypeWrap('"unknown"', { ...schema, nullable })
-    const baseResult = schemas.length === 1 ? schemas[0] : intersectionStr(schemas, isArktype)
+    const intersected = [...schemas, ...objectKeysMembers(schema, rootName, isArktype, options)]
+    const baseResult =
+      intersected.length === 1 ? intersected[0] : intersectionStr(intersected, isArktype)
     return arktypeWrap(baseResult, { ...schema, nullable })
   }
 
@@ -489,30 +546,47 @@ function node(
         : lengthExpr
     const containsNarrows = ((): readonly string[] => {
       if (!schema.contains) return []
-      const containsRt = asRuntime(arktype(schema.contains, rootName, isArktype, options))
+      const containsRt = callbackType(
+        arktype(schema.contains, rootName, isArktype, options),
+        isArktype,
+      )
       const minC = schema.minContains
       const maxC = schema.maxContains
       if (minC === undefined && maxC === undefined) {
         const msg = containsMessage ?? 'must contain at least one matching item'
         return [
-          `.narrow((data: unknown[], ctx) => data.some((item) => ${containsRt}.allows(item)) || ctx.mustBe(${JSON.stringify(msg)}))`,
+          callbackReturn(
+            '(data: unknown[], ctx)',
+            `data.some((item) => ${containsRt}.allows(item)) || ctx.mustBe(${JSON.stringify(msg)})`,
+          ),
         ]
       }
       const effectiveMin = minC ?? 1
       const minNarrow =
         effectiveMin > 0
-          ? `.narrow((data: unknown[], ctx) => data.filter((item) => ${containsRt}.allows(item)).length >= ${effectiveMin} || ctx.mustBe(${JSON.stringify(minContainsMessage ?? `must contain at least ${effectiveMin} matching items`)}))`
+          ? callbackReturn(
+              '(data: unknown[], ctx)',
+              `data.filter((item) => ${containsRt}.allows(item)).length >= ${effectiveMin} || ctx.mustBe(${JSON.stringify(minContainsMessage ?? `must contain at least ${effectiveMin} matching items`)})`,
+            )
           : undefined
       const maxNarrow =
         maxC !== undefined
-          ? `.narrow((data: unknown[], ctx) => data.filter((item) => ${containsRt}.allows(item)).length <= ${maxC} || ctx.mustBe(${JSON.stringify(maxContainsMessage ?? `must contain at most ${maxC} matching items`)}))`
+          ? callbackReturn(
+              '(data: unknown[], ctx)',
+              `data.filter((item) => ${containsRt}.allows(item)).length <= ${maxC} || ctx.mustBe(${JSON.stringify(maxContainsMessage ?? `must contain at most ${maxC} matching items`)})`,
+            )
           : undefined
       return [minNarrow, maxNarrow].filter((v): v is string => v !== undefined)
     })()
     // unevaluatedItems is handled in the prefixItems branch; with `items` alone,
     // JSON Schema 2020-12 §11.3 makes the keyword redundant.
     const arrayExpr = containsNarrows.reduce(
-      (acc, narrow) => `${asRuntime(acc)}${narrow}`,
+      // Inside a scope a definition keeps its narrows in definition syntax, which the
+      // scope resolves.
+      (acc, narrow) =>
+        isArktype && isArktypeDefinition(acc)
+          ? `[${acc},":",${narrow}]`
+          : `${asRuntime(acc)}.narrow(${narrow})`,
       uniqueExpr,
     )
     return arktypeWrap(wireArray(describeWithMessage(arrayExpr, schema['x-items-message'])), schema)
